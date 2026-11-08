@@ -182,3 +182,9 @@ The brief said "tanks placed randomly each round" and "each round starts with a 
 Since battles now reshape the map, placement and shops are done **per battle** (fresh
 terrain + random placement each battle; shop before each battle). A "round" inside a
 battle means one turn cycle of every living tank — that's what the storm counts.
+
+## License
+
+MIT — free to use, modify and redistribute (see [LICENSE](LICENSE)).
+"Scorched Earth" is an existing game by Reflexive Entertainment; this is an
+independent homage/remake, sharing no code or assets with it.

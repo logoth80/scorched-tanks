@@ -1,0 +1,10 @@
+# local tooling (bundled gh CLI, not part of the game)
+.tools/
+
+# editor / OS noise
+*.sublime-*
+Thumbs.db
+.DS_Store
+
+# generated test/debug artifacts
+debug_*.js

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorched Tanks — destructible-terrain artillery</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="game" width="1024" height="768"></canvas>
+
+  <div id="hud">
+    <div id="topbar">
+      <span id="roundLabel">Battle —</span>
+      <span id="windBox">Wind <b id="windArrow">·</b> <span id="windVal">0.0</span></span>
+      <span class="spacer"></span>
+      <button id="muteBtn">🔊</button>
+      <button id="newGameBtn">New game</button>
+    </div>
+
+    <div id="playerCards"></div>
+    <div id="log"></div>
+
+    <div id="turnpanel" class="hidden">
+      <div id="tpName"></div>
+      <div class="tpRow">
+        <span class="lbl">Angle</span>
+        <button data-angle="-5">◀</button><span id="angleVal" class="val">55°</span><button data-angle="5">▶</button>
+        <span class="lbl">Power</span>
+        <button data-power="-5">−</button><span id="powerVal" class="val">50</span><button data-power="5">+</button>
+      </div>
+      <div class="tpRow">
+        <span class="lbl">Move (fuel)</span>
+        <button id="moveL">◀◀</button><span id="fuelVal" class="val">100px</span><button id="moveR">▶▶</button>
+      </div>
+      <div id="ammoRow"></div>
+      <div class="tpRow">
+        <button id="fireBtn">🔥 FIRE (Space)</button>
+        <span id="ctrlHelp">Drag on the field to aim &amp; fire · ←→ angle · ↑↓ power · A/D drive · 1-6 select ammo</span>
+      </div>
+    </div>
+
+    <div id="banner"></div>
+
+    <div id="shopModal" class="modal hidden">
+      <div class="mbox">
+        <h2><span class="dot"></span><span id="shopTitle">Shop</span> — <span id="shopMoney" class="money">$0</span></h2>
+        <div id="shopItems"></div>
+        <button id="shopDone" class="big">Done — pass the device on</button>
+      </div>
+    </div>
+
+    <div id="setupModal" class="modal">
+      <div class="mbox">
+        <h1>🪖 Scorched Tanks</h1>
+        <p class="tag">2–8 players (human hotseat or CPU) · fully destructible pixel terrain ·
+        a match is a series of battles on fresh maps · shop runs between battles ·
+        wind changes every turn · fuel is scarce.</p>
+        <div class="row">
+          <label>Players: <input id="seatCount" type="number" min="2" max="8" value="4"></label>
+          <label>Battles: <input id="battlesInput" type="number" min="1" max="9" value="3"></label>
+          <span class="fine">Each seat can be HUMAN or CPU — mix freely.</span>
+        </div>
+        <div id="seatList"></div>
+        <button id="startBtn" class="big">Start game</button>
+        <p class="fine">Direct hit = instant kill · every blast first shows its growing damage circle ·
+        after that the ground takes damage, collapses into holes, slumps down slopes, and only then tanks fall ·
+        Parachutes soften falls, Shields absorb all damage from everyone else until your next turn.
+        Money and ammo carry between battles; HP and fuel reset.</p>
+      </div>
+    </div>
+
+    <div id="overModal" class="modal hidden">
+      <div class="mbox">
+        <h2 id="overTitle"></h2>
+        <div id="overStats"></div>
+        <div class="row">
+          <button id="againBtn" class="big">Play again (same players)</button>
+          <button id="toSetupBtn">Setup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/weapons.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/game.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

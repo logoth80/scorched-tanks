@@ -1,0 +1,131 @@
+/* ============ layout: game keeps its 4:3 aspect, HUD overlays it ===== */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0b0e14; color: #dfe6ee;
+  font: 13px/1.45 system-ui, Segoe UI, Roboto, sans-serif; }
+body { display: flex; align-items: center; justify-content: center; }
+
+#stage {
+  position: relative;
+  width: min(100vw, calc(100vh * 1024 / 768));
+  aspect-ratio: 1024 / 768;
+}
+#game { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
+
+#hud { position: absolute; inset: 0; pointer-events: none; }
+#hud button { pointer-events: auto; cursor: pointer; }
+#hud .hidden { display: none !important; }
+
+/* ---------------- top bar ---------------- */
+#topbar {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 10px; background: rgba(8,10,16,.72);
+  font-weight: 600; letter-spacing: .02em;
+}
+#topbar .spacer { flex: 1; }
+#topbar button { background: #222b3a; color: #cfd8e6; border: 1px solid #3a4a63;
+  border-radius: 6px; padding: 3px 10px; font-size: 12px; }
+#topbar button:hover { background: #2d3a4f; }
+#windBox b { font-size: 15px; }
+#roundLabel { color: #9fb4cc; }
+
+/* ---------------- player cards ---------------- */
+#playerCards {
+  position: absolute; top: 40px; left: 8px; width: 190px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.card { background: rgba(10,14,20,.72); border: 1px solid #263141;
+  border-radius: 6px; padding: 5px 7px; }
+.card.active { outline: 2px solid #7fb2d9; }
+.card.dead { opacity: .35; filter: grayscale(1); }
+.cHead { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.cHead span:first-child, .oRow span { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.cMoney { margin-left: auto; color: #8ee08e; font-weight: 700; }
+.bar { height: 5px; background: #1a222e; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; }
+.bar.fuel i { background: #5b8dd9; }
+.cAmmo { font-size: 10px; color: #93a7bf; margin-top: 3px; word-break: break-word; }
+
+/* ---------------- event log ---------------- */
+#log { position: absolute; left: 8px; bottom: 96px; width: 300px;
+  font: 11px/1.5 monospace; color: #b8c6d8; }
+.logLine { text-shadow: 0 1px 2px #000; }
+.logLine.kill { color: #ff9a8a; }
+.logLine.buy { color: #8ee08e; }
+.logLine.hit { color: #e8c86a; }
+.logLine.sys { color: #7fb2d9; font-weight: 700; }
+
+/* ---------------- turn panel ---------------- */
+#turnpanel {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  width: min(640px, 96%); background: rgba(10,14,20,.85);
+  border: 1px solid #2c3949; border-radius: 10px; padding: 8px 12px;
+  pointer-events: auto;
+}
+#turnpanel.cpuTurn .tpRow button, #ammoRow button { pointer-events: none; opacity: .5; }
+#tpName { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 7px; }
+#tpName span { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+.tpRow { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; }
+.tpRow .lbl { color: #8fa4bd; font-size: 11px; min-width: 60px; }
+.tpRow button { background: #263242; border: 1px solid #3d4f68; color: #dfe6ee;
+  border-radius: 6px; padding: 4px 10px; font-size: 13px; min-width: 34px; }
+.tpRow button:hover { background: #33445c; }
+.val { font: 700 14px monospace; min-width: 46px; text-align: center; }
+#ammoRow { display: flex; gap: 5px; flex-wrap: wrap; margin: 5px 0; }
+.ammoBtn { background: #1d2733; border: 1px solid #35455c; color: #c9d5e2;
+  border-radius: 5px; padding: 3px 8px; font-size: 11px; }
+.ammoBtn.on { background: #2f5d8a; border-color: #4d84b8; }
+.ammoBtn.off { opacity: .35; }
+#fireBtn { background: #7e2f22; border-color: #b04a35; font-weight: 700; font-size: 14px; padding: 6px 14px; }
+#fireBtn:hover { background: #a03c2b; }
+#ctrlHelp { color: #66788d; font-size: 10.5px; }
+
+/* ---------------- banner ---------------- */
+#banner { position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+  text-align: center; font-size: 30px; opacity: 0; pointer-events: none;
+  text-shadow: 0 2px 10px #000; }
+#banner.fade { animation: banner 1.8s ease forwards; }
+#banner span { display: block; font-size: 15px; color: #cfd8e6; }
+@keyframes banner { 0% {opacity:0; transform:translateX(-50%) scale(.9);} 15% {opacity:1;}
+  80% {opacity:1;} 100% {opacity:0;} }
+
+/* ---------------- modals ---------------- */
+.modal { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; background: rgba(5,7,11,.78); pointer-events: auto; }
+.mbox { width: min(760px, 94%); max-height: 92%; overflow: auto;
+  background: #121824; border: 1px solid #2c3949; border-radius: 12px; padding: 16px 20px; }
+.mbox h1, .mbox h2 { margin: 0 0 6px; }
+.mbox .dot { width: 13px; height: 13px; border-radius: 3px; background: #888; display: inline-block; }
+.money { color: #8ee08e; }
+button.big { background: #2f5d8a; border: 1px solid #4d84b8; color: #eaf2fa;
+  font-size: 15px; font-weight: 700; padding: 9px 18px; border-radius: 8px; margin-top: 10px; }
+button.big:hover { background: #3a72a8; }
+.fine { color: #7186a0; font-size: 11px; }
+.tag { color: #9fb4cc; }
+.row { display: flex; gap: 12px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+input[type=number] { width: 56px; background: #1c2634; color: #dfe6ee;
+  border: 1px solid #3a4a63; border-radius: 5px; padding: 4px; }
+
+/* setup seats */
+.seatRow { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.seatDot { width: 12px; height: 12px; border-radius: 3px; }
+.seatName { flex: 1; background: #1c2634; color: #dfe6ee; border: 1px solid #3a4a63;
+  border-radius: 5px; padding: 5px 8px; }
+.seatMode { min-width: 74px; background: #263242; border: 1px solid #3d4f68;
+  color: #dfe6ee; border-radius: 6px; padding: 5px 8px; }
+.seatMode[data-mode=human] { background: #2f5d46; border-color: #4f8f6b; }
+
+/* shop */
+#shopItems { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px; margin-top: 8px; }
+.shopCard { background: #1a2430; border: 1px solid #33445c; border-radius: 8px;
+  padding: 9px 11px; cursor: pointer; }
+.shopCard:hover { background: #223041; }
+.shopCard.off { opacity: .4; cursor: default; }
+.shopCard b { color: #eaf2fa; }
+.sDesc { color: #8fa4bd; font-size: 11px; min-height: 30px; margin: 4px 0; }
+.sFoot { display: flex; justify-content: space-between; color: #93a7bf; font-size: 11px; }
+.sPrice { color: #e8c86a; font-weight: 700; }
+
+/* game over */
+.oRow { display: flex; align-items: center; gap: 8px; padding: 3px 0; }

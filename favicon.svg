@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+  <!-- Player-1 red tank, drawn 1:1 from the game's sprite (render.js _drawTank,
+       'hauler' variant, 3x scale, barrel at 60 deg like the in-game default). -->
+  <!-- tracks -->
+  <rect x="10" y="53" width="60" height="15" rx="6" fill="#22242a"/>
+  <circle cx="16"   cy="60.5" r="4" fill="rgba(0,0,0,0.35)"/>
+  <circle cx="28"   cy="60.5" r="4" fill="rgba(0,0,0,0.35)"/>
+  <circle cx="40"   cy="60.5" r="4" fill="rgba(0,0,0,0.35)"/>
+  <circle cx="52"   cy="60.5" r="4" fill="rgba(0,0,0,0.35)"/>
+  <circle cx="64"   cy="60.5" r="4" fill="rgba(0,0,0,0.35)"/>
+  <!-- hull -->
+  <rect x="13" y="35" width="54" height="18" rx="6" fill="#e0453a"/>
+  <!-- turret -->
+  <rect x="31" y="29" width="24" height="12" rx="4.5" fill="#7e1f18"/>
+  <!-- barrel (pivot 40,41 — 60 deg, round caps) -->
+  <line x1="40" y1="41" x2="61" y2="4.6" stroke="#7e1f18" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="40" cy="41" r="4" fill="#7e1f18"/>
+</svg>

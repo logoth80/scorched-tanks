@@ -7,6 +7,8 @@
  *  3. ammunition ↔ terrain interaction through the real turn pipeline:
  *     blast circles grow BEFORE damage, ground changes only at resolve,
  *     then settle, then tanks
+ *  3.5 nicknames from names.js (unique, per-game), round order
+ *     re-shuffled every cycle, spawn slots assigned to random seats
  *  4. full matches (multi-battle): shop exactly once per battle,
  *     fresh terrain+placement each battle, money/ammo carry over,
  *     storms keep matches finite
@@ -14,6 +16,7 @@
  * ===================================================================== */
 'use strict';
 require('../js/config.js');
+require('../js/names.js');
 require('../js/terrain.js');
 require('../js/weapons.js');
 require('../js/ai.js');
@@ -281,11 +284,14 @@ function seatset(n, humanAt) {
   for (let i = 0; i < n; i++) s.push({ human: !!(humanAt && humanAt.includes(i)) });
   return s;
 }
-function bareGame(seed) {                 // 2 humans, 1 battle, at first turn
+function bareGame(seed) {                 // 2 humans, 1 battle; seat 0 is up
   const g = new SE.Game({ seed: seed, seats: seatset(2, [0, 1]), battles: 1 });
   g.start();
   g.endCurrentBuyer();
   g.endCurrentBuyer();
+  // cycle order is RANDOM now — fast-forward until it is seat 0's turn
+  let guard = 0;
+  while (g.currentId !== 0 && guard++ < 10) g._turnDone();
   return g;                              // state: aim, seat 0
 }
 
@@ -385,6 +391,7 @@ function levelBasin(T, cx, halfW) {
   let nP = 0; while (g.terrain.settleStep() && nP++ < 9000);
   g.wind = 0;
   const p = g.players[0];
+  const r0 = g.round;                                  // cycle we are inside
   p.shield = true; g.players[1].shield = true;   // nobody dies during this test
   p.ammo = p.ammo || {}; p.ammo.napalm = 1;      // engine grants ammo via shop; grant here
   g.aimTo(p.id, 90, 40);
@@ -400,9 +407,9 @@ function levelBasin(T, cx, halfW) {
   }
   check('turn resolution HOLDS while the ground burns (burn phase exists)',
     sawBurn && maxBurn >= 60, 'sawBurn=' + sawBurn + ' held=' + maxBurn);
-  check('next player only starts once the fire is gone',
-    g.state === 'aim' && g.current().id === 1 && !g.terrain.hasFire(),
-    'state=' + g.state + ' current=' + g.current().id + ' fire=' + g.terrain.hasFire());
+  check('the turn passes ONLY once the fire is gone',
+    g.state === 'aim' && !g.terrain.hasFire() && (g.currentId !== p.id || g.round > r0),
+    'state=' + g.state + ' current=' + g.currentId + ' round=' + g.round + ' fire=' + g.terrain.hasFire());
 }
 
 /* power may be raised to POWER_MAX through the game layer too */
@@ -463,25 +470,28 @@ function levelBasin(T, cx, halfW) {
   const b0 = g.buy(0, 'shield');
   g.endCurrentBuyer();
   const b1 = g.buy(1, 'shield');
-  g.endCurrentBuyer();                     // → seat 0's turn begins
+  g.endCurrentBuyer();                     // → a RANDOM seat's turn begins
   check('shields bought at the pre-battle shop', b0 && b1);
-  check('own shield already faded when own turn begins',
-    g.players[0].shield === false && g.players[1].shield === true,
-    'p0=' + g.players[0].shield + ' p1=' + g.players[1].shield);
-  g.startTurn(1);                          // seat 1's turn begins
+  const cur = g.currentId, other = 1 - cur;
+  check('the current player\'s own shield already faded at their turn start; the other keeps theirs',
+    g.players[cur].shield === false && g.players[other].shield === true,
+    'cur=' + cur + ' p0=' + g.players[0].shield + ' p1=' + g.players[1].shield);
+  g.startTurn(other);                      // the other seat's turn begins
   check('opponent shield fades when their turn begins',
-    g.players[1].shield === false, 'p1=' + g.players[1].shield);
+    g.players[other].shield === false, 'other=' + other);
 }
 
 /* the player's angle/power and shot feedback survive into the next turn */
 {
   const g = bareGame(34);                        // humans-only, seat 0 at aim
+  const r0 = g.round;
   g.aimTo(0, 77, 42);
   g.fire();
   let guard = 0;
   while ((g.state === 'flight' || g.state === 'resolve') && guard++ < 5000) g.tick();
-  check('shot completed, next player is up',
-    g.state === 'aim' && g.currentId === 1, 'state=' + g.state + ' current=' + g.currentId);
+  check('shot completed, the flow moved on (next seat, or a fresh reshuffled cycle)',
+    g.state === 'aim' && (g.currentId !== 0 || g.round > r0),
+    'state=' + g.state + ' current=' + g.currentId + ' round=' + g.round);
   check('shot memory was recorded (angle + impact)',
     !!g.players[0].lastShot && Math.abs(g.players[0].lastShot.angle - 77) < 0.01 &&
     !!g.players[0].lastImpact,
@@ -542,6 +552,71 @@ function levelBasin(T, cx, halfW) {
   }
   check('tanks never spawn touching each other (closest pair >= 85px)',
     worst >= 85, 'closest pair was ' + worst + ' px apart');
+}
+
+/* ---------------- 3.5 nicknames, random round order, random slots ---- */
+console.log('[names]');
+{
+  const g = new SE.Game({ seed: 5, seats: seatset(4), battles: 2 });
+  const n1 = g.players.map(function (p) { return p.name; });
+  check('CPU seats get random NICKNAMES from names.js (never "CPU n")',
+    n1.every(function (n, i) { return n !== 'CPU ' + (i + 1) && SE.NAMES.indexOf(n) >= 0; }),
+    JSON.stringify(n1));
+  check('nicknames are unique within a game', new Set(n1).size === n1.length, JSON.stringify(n1));
+  const g2 = new SE.Game({ seed: 6, seats: seatset(4), battles: 1 });
+  const n2 = g2.players.map(function (p) { return p.name; });
+  check('a NEW game draws different nicknames',
+    n1.some(function (n, i) { return n2[i] !== n; }), JSON.stringify(n2));
+  g._nextBattle(false);            // later battles must NOT redraw names
+  check('nicknames last the WHOLE game (not redrawn per battle)',
+    g.players.every(function (p, i) { return p.name === n1[i]; }),
+    JSON.stringify(g.players.map(function (p) { return p.name; })));
+  const gh = new SE.Game({ seed: 5, seats: seatset(2, [0]), battles: 1 });
+  check('humans stay "Player N"; a custom seat name still wins',
+    gh.players[0].name === 'Player 1' && SE.NAMES.indexOf(gh.players[1].name) >= 0);
+  check('names.js list has no duplicates and has plenty to choose from',
+    new Set(SE.NAMES).size === SE.NAMES.length && SE.NAMES.length >= 16);
+}
+
+console.log('[round order]');
+{
+  const firsts = {};
+  for (let s = 1; s <= 8; s++) {
+    const g = new SE.Game({ seed: s * 111, seats: seatset(4), battles: 1 });
+    g.start();
+    let guard = 0;
+    while (g.state !== 'aim' && guard++ < 4000) g.tick();   // CPUs shop by themselves
+    firsts[s] = g.currentId;
+  }
+  check('the first cycle of a battle starts at a RANDOM seat (not always seat 1)',
+    new Set(Object.keys(firsts).map(function (k) { return firsts[k]; })).size >= 2,
+    JSON.stringify(firsts));
+  const g = new SE.Game({ seed: 3, seats: seatset(4), battles: 1 });
+  g.start();
+  let guard = 0;
+  while (g.state !== 'aim' && guard++ < 4000) g.tick();
+  check('a cycle order contains every living player EXACTLY once',
+    g.roundOrder.slice().sort().join(',') === '0,1,2,3', g.roundOrder.join(','));
+  const seen = new Set([g.roundOrder.join(',')]);
+  for (let r = 0; r < 10; r++) { g._beginRound(); seen.add(g.roundOrder.join(',')); }
+  check('EVERY new turn-cycle reshuffles who plays in what order',
+    seen.size >= 4, 'distinct orders=' + seen.size);
+}
+
+console.log('[random spawn slots]');
+{
+  const patterns = {};
+  for (let s = 1; s <= 8; s++) {
+    const g = new SE.Game({ seed: 400 + s * 7, seats: seatset(4), battles: 1 });
+    g.start();                                    // generation + placement happen here
+    const xs = g.players.map(function (p) { return p.x; });
+    let mn = 0, mx = 0;
+    for (let i = 1; i < 4; i++) { if (xs[i] < xs[mn]) mn = i; if (xs[i] > xs[mx]) mx = i; }
+    patterns[s] = mn + '->' + mx;                 // leftmost seat -> rightmost seat
+  }
+  check('spawn slots go to RANDOM seats (seat 1 is not always left, seat 4 not always right)',
+    new Set(Object.keys(patterns).map(function (k) { return patterns[k]; })).size >= 3,
+    JSON.stringify(patterns));
 }
 
 /* ---------------- 4. full matches to termination ---------------- */

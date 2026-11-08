@@ -1,5 +1,6 @@
 'use strict';
 require('../js/config.js');
+require('../js/names.js');
 require('../js/terrain.js');
 require('../js/weapons.js');
 require('../js/ai.js');

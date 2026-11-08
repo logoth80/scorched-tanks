@@ -5,26 +5,26 @@ dependencies, no server-side code. 2–8 players (human hotseat or CPU), procedu
 generated 1024×768 mountains where **every pixel of ground is destructible**, and a
 classic turn-based artillery economy.
 
-## Play it directly from GitHub (GitHub Pages)
+## Play it online
 
-1. Create a repository on GitHub and push this folder to it:
-   ```sh
-   git init
-   git add -A
-   git commit -m "Scorched Tanks"
-   git remote add origin https://github.com/USERNAME/REPO.git
-   git branch -M main
-   git push -u origin main
-   ```
-2. On GitHub: **Settings → Pages → Source: Deploy from a branch → `main` / root**.
-3. The game is live at `https://USERNAME.github.io/REPO/` — there is nothing to build.
+**https://logoth80.github.io/scorched-tanks/** — that's the live game, served straight
+from this repo by GitHub Pages. Nothing to build; the repo root *is* the web root.
 
 Locally, just open `index.html` in any modern browser (it works from `file://` too).
+Forking to your own GitHub? Push the folder and enable **Settings → Pages →
+Deploy from a branch → default branch / root** — it will serve `index.html` the same way.
 
 ## How a match works
 
 - A **match = a series of battles** (3 by default, changeable on the setup screen and in
-  `js/config.js`). Tanks are placed **randomly on brand-new terrain for every battle**.
+  `js/config.js`). Every battle gets **brand-new terrain and a fresh placement — and the
+  spawn slots themselves are re-shuffled between seats**, so seat 1 is not "always the
+  left one" (each tank still keeps a guaranteed personal slice, no spawning on top
+  of each other).
+- **Who starts each round is random:** the play order of every turn-cycle is
+  re-shuffled — inside a battle you never know who fires next.
+- CPU tanks get **random nicknames** (Boomhild, Baron Blitz, Anzio Annie…) from
+  `js/names.js` — unique per game, kept for the whole match, easy to extend.
 - The **shop runs only before the first battle and between battles** — never mid-battle.
   Money and purchased ammo **carry over**; HP and fuel reset each battle.
 - Each turn: change barrel angle, pick power (or drag on the field to aim & fire),
@@ -51,7 +51,8 @@ Locally, just open `index.html` in any modern browser (it works from `file://` t
   tie). Kills pay an extra bonus during battle. No separate "win bonus" — placement
   inside the battle already pays.
 - Tanks **spawn in their own guaranteed slice of the map** — two tanks can never
-  spawn touching, whatever the RNG does.
+  spawn touching, whatever the RNG does — and **which seat gets which slice is
+  re-shuffled every battle**.
 - Anti-stalemate "storm": from round 14 every survivor is harmed a little more each
   round, so no match can drag forever (fully tunable).
 
@@ -158,7 +159,8 @@ The engine is DOM-free, so the whole game can be simulated headless:
 
 ```sh
 node test/sim.js      # terrain invariants, open map borders, every weapon incl.
-                      # liquid-fire flow/kill rules, power cap, strict turn order,
+                      # liquid-fire flow/kill rules, power cap, strict turn pipeline,
+                      # nicknames, re-shuffled round order, random spawn slots,
                       # multi-battle match flow, 5 seeded full matches + an 8P match
 node test/stress.js   # 40 seeded matches: all must terminate
 ```
@@ -168,9 +170,10 @@ node test/stress.js   # 40 seeded matches: all must terminate
 | File | What lives there |
 |---|---|
 | `js/config.js` | **every tunable** — physics, economy, terrain stability, fire fluid, the ammo table |
+| `js/names.js` | CPU nickname list — add/remove entries freely, the game draws from it |
 | `js/terrain.js` | pixel terrain: one bit per pixel, hole collapse + slope slumping, liquid-fire fluid |
 | `js/weapons.js` | projectile behaviors shared by all ammo definitions |
-| `js/game.js` | match/battle/turn state machine, resolution order, economy |
+| `js/game.js` | match/battle/turn state machine, resolution order, round-order shuffle, economy |
 | `js/ai.js` | CPU aiming (trajectory sampling against terrain) and shopping |
 | `js/render.js` | canvas: single-color terrain via dirty-rect repaint, sprites, effects |
 | `js/ui.js` | DOM: setup, shop, HUD, turn panel, scoreboard |
@@ -182,6 +185,11 @@ The brief said "tanks placed randomly each round" and "each round starts with a 
 Since battles now reshape the map, placement and shops are done **per battle** (fresh
 terrain + random placement each battle; shop before each battle). A "round" inside a
 battle means one turn cycle of every living tank — that's what the storm counts.
+"Randomise who starts the round" is implemented as **re-shuffling the whole cycle
+order** every round (which is strictly more random than only picking a starter), and
+"player location should be random" is done by **re-dealing spawn slots to seats**
+each battle — the per-seat guaranteed spacing still holds because the guarantee is
+positional, not seat-based.
 
 ## License
 

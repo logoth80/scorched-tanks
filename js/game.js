@@ -9,7 +9,7 @@
  *   fuel reset, money and purchased ammo carry over. Last battle over
  *   → match winner = most battle wins.
  *
- * TURN RESOLUTION ORDER (strict, per the design):
+ *   TURN RESOLUTION ORDER (strict, per the design):
  *   1. the shot resolves (every projectile finishes; blast circles are
  *      shown GROWING from each impact — no damage yet)
  *   2. once all circles finish growing: damage to players (a tank FULLY
@@ -17,7 +17,14 @@
  *      shielded this turn takes none) + the circle's ground is destroyed
  *   3. the ground falls (settling runs to completion — visibly, slowly)
  *   4. tanks fall if their ground went, then fall damage is applied
+ *   5. while liquid fire still burns the game WAITS — the next player
+ *      only starts once the fire has vanished (FIRE_WAIT_MAX cap)
  *   ... only then does the next turn (or the next battle) begin.
+ *
+ *   WHO PLAYS WHEN: each turn-cycle inside a battle starts in a NEWLY
+ *   SHUFFLED order (who starts the round is random), and every battle
+ *   re-shuffles WHICH spawn slot each seat gets. CPU seats draw one-off
+ *   nicknames from names.js that last the whole match.
  * ===================================================================== */
 (function (root) {
 'use strict';
@@ -39,10 +46,16 @@ class Game {
     });
     this.terrain = new SE.Terrain(CFG.W, CFG.H);
 
+    // CPU seats draw unique nicknames from names.js (js/names.js), shuffled
+    // with THIS game's seed — a nickname lasts for the whole match.
+    const nameBag = this._shuffle((SE.NAMES && SE.NAMES.length) ? SE.NAMES : null);
+    let nameAt = 0;
+
     this.players = this.seats.map(function (s, i) {
       const col = SE.PLAYER_COLORS[i % SE.PLAYER_COLORS.length];
+      const nick = !s.human && nameBag.length ? nameBag[nameAt++ % nameBag.length] : null;
       return {
-        id: i, name: s.name || (s.human ? 'Player ' + (i + 1) : 'CPU ' + (i + 1)),
+        id: i, name: s.name || (s.human ? 'Player ' + (i + 1) : (nick || 'CPU ' + (i + 1))),
         human: s.human, color: col, colorIdx: i,
         variant: SE.TANK_VARIANTS[i % SE.TANK_VARIANTS.length],
         x: 0, y: 0, vy: 0, falling: false, fallStartY: 0, paraActive: false,
@@ -56,6 +69,7 @@ class Game {
 
     this.state = 'idle';          // idle | between | shop | aim | flight | resolve | over
     this.round = 0;              // turn-cycles inside the current battle (for the storm)
+    this.roundOrder = [];        // WHO plays in the current cycle — re-shuffled every round
     this.turnIdx = -1;
     this.currentId = -1;
     this.wind = 0;
@@ -90,6 +104,14 @@ class Game {
     for (let i = 0; i < this.players.length; i++) if (this.players[i].alive) return i;
     return -1;
   }
+  _shuffle(list) {  // Fisher–Yates with THIS game's seeded RNG
+    const a = (list || []).slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rand() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
 
   /* ---------- match / battle flow ---------- */
   start() {
@@ -103,6 +125,7 @@ class Game {
     this.terrain.generate(this.rand);
     this.terrain.clearFire();
     this.round = 0;
+    this.roundOrder = [];
     this.wind = 0;
     this.projectiles = [];
     this.blastQueue = [];
@@ -129,11 +152,14 @@ class Game {
     // bounded jitter, so NO TWO TANKS can ever spawn touching each other,
     // whatever the RNG does. Min separation = W/n − 2·jitter (≥ 90 px even
     // for 8 players — tanks are 26 px wide).
+    // WHICH seat gets WHICH slot is re-shuffled every battle — seat 1 is
+    // not "always the left one".
     const n = this.players.length;
+    const seats = this._shuffle(this.players.map(function (p) { return p.id; }));
     const step = CFG.W / n;
     const jit = Math.min(60, (step - 90) / 2);
     for (let i = 0; i < n; i++) {
-      const p = this.players[i];
+      const p = this.players[seats[i]];
       const center = step * (i + 0.5);
       const w = Math.max(4, Math.floor(jit) - 3);   // random centre stays inside the jitter budget
       let placed = false;
@@ -225,7 +251,7 @@ class Game {
   endCurrentBuyer() {
     if (this.state !== 'shop') return;
     this.shopQueue.shift();
-    if (!this.shopQueue.length) { this.startTurn(this.firstAliveSeat()); return; }
+    if (!this.shopQueue.length) { this._startCycle(); return; }
     this.currentId = this.players[this.shopQueue[0]].id;
     this.aiTimer = this.currentShopBuyerIsCpu() ? 45 + Math.floor(this.rand() * 40) : 0;
     this._emitShopBuyer();
@@ -293,7 +319,7 @@ class Game {
     if (!p.human) this.aiTimer = 55 + Math.floor(this.rand() * 55);
   }
 
-  _beginRound() {   // every player has shot — a new turn-cycle starts
+  _beginRound() {   // every player has shot — a NEW cycle starts in random order
     this.round++;
     this.emit('round', { round: this.round, battle: this.battle });
     if (this.round >= CFG.STORM_FROM_ROUND) {
@@ -305,7 +331,15 @@ class Game {
       }
       if (this.aliveCount() <= 1) { this._endOfBattle(); return; }
     }
-    this.startTurn(this.firstAliveSeat());
+    this._startCycle();
+  }
+
+  /* WHO STARTS each cycle is random: shuffle the living seats. */
+  _startCycle() {
+    const ids = [];
+    for (const p of this.players) if (p.alive) ids.push(p.id);
+    this.roundOrder = this._shuffle(ids);
+    this.startTurn(this.roundOrder[0] != null ? this.roundOrder[0] : this.firstAliveSeat());
   }
 
   aimTo(pid, angle, power) {
@@ -684,12 +718,14 @@ class Game {
   _turnDone() {
     this.emit('turnEnd', { playerId: this.currentId });
     if (this.aliveCount() <= 1) { this._endOfBattle(); return; }
-    let next = -1;
-    for (let i = this.turnIdx + 1; i < this.players.length; i++) {
-      if (this.players[i].alive) { next = i; break; }
-    }
-    if (next < 0) { this._beginRound(); return; }   // everyone had a turn → new round
-    this.startTurn(next);
+    // drop whoever just shot (and anyone who died mid-cycle) from the order
+    const cur = this.currentId;
+    const ps = this.players;
+    this.roundOrder = this.roundOrder.filter(function (id) {
+      return id !== cur && ps[id].alive;
+    });
+    if (!this.roundOrder.length) { this._beginRound(); return; }  // cycle done → re-shuffle
+    this.startTurn(this.roundOrder[0]);
   }
 }
 

@@ -40,8 +40,15 @@ Locally, just open `index.html` in any modern browser (it works from `file://` t
   3. **the ground falls**: soil collapses into every hole and slumps down over-steep
      slopes until stable (mass is exactly conserved),
   4. **tanks fall** if their ground went away, and **fall damage** is applied.
-- Direct hit = 100 damage = always lethal. Blast damage falls off inside the shown
-  circle. Kill rewards, battle-win and survival pays fund your shopping.
+- Direct hit / **tank fully inside a blast circle = 100 damage = always lethal**
+  (measured to the tank's farthest corner). Blast damage falls off only for tanks
+  *partially* inside the shown circle. Shields block either case.
+- **Every tank is paid at the end of each battle: $700 plus $100 for every enemy it
+  outlasted** (survivors outlast all dead tanks; tanks that die in the same exchange
+  tie). Kills pay an extra bonus during battle. No separate "win bonus" — placement
+  inside the battle already pays.
+- Tanks **spawn in their own guaranteed slice of the map** — two tanks can never
+  spawn touching, whatever the RNG does.
 - Anti-stalemate "storm": from round 14 every survivor is harmed a little more each
   round, so no match can drag forever (fully tunable).
 
@@ -59,21 +66,41 @@ Locally, just open `index.html` in any modern browser (it works from `file://` t
 All ammo lives in one table in [`js/config.js`](js/config.js) — copy an entry, change
 numbers, and it shows up in the shop and the AI's decisions automatically. Behaviors
 are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cluster`,
-`roll`, `multiblast`, `addground`). Current lineup:
+`roll`, `multiblast`, `addground`, `fire`). Each weapon's `launch` block can tune
+`speedScale / gravityScale / windScale / drag` and a per-shot **fall-speed cap**
+(`terminal` — small values make ordnance *drift*). Current lineup:
 
 | Ammo | Effect |
 |---|---|
 | Basic Shot | free, unlimited |
-| Cluster Bomb | splits at the apex, **scattering bomblets very wide** — bomblets never explode, only direct hits count |
+| Cluster Bomb | splits at the apex, **scattering bomblets very wide**; bomblets drift down slowly and each makes a **small blast** — area denial, not one big crater |
 | Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows |
-| Napalm | huge fire radius, **wide shallow crater** (`craterY` squashes the dig) |
+| Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; see below |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
 
+**Liquid fire** is a per-column fluid (`js/terrain.js`: `fire[]` + flow/burn rules):
+its surface seeks level, so it genuinely runs down mountains and fills low ground;
+it burns for `fire.life` frames, then shrinks away. Touching it hurts over time
+(`FIRE_DOT` every `FIRE_TICK` frames); a tank **fully submerged** in the fluid
+(depth ≥ tank height) dies on the spot — unless shielded. The fire's owner gets
+credit for the kill, and the kill's battle-death order feeds the outlast payout.
+All knobs (`FIRE_MAX/FLOW/MIN_LEVEL/KEEP/BURNOUT/DOT/TICK`) are in `config.js`.
+
 Every explosion's **damage circle** (`explosion.radius`) is deliberately decoupled
-from the **crater** it digs (`explosion.crater` × radius) — grow one without
-growing the other. All damage radii are 1.5× by design; the circles are
-telegraphed on screen before anything detonates, so bigger danger stays fair.
+from the **crater** it digs (`explosion.crater` × radius) — every *explosive* weapon
+digs the full circle (a blast removes everything it shows), while the dirt bomb's
+small defensive blast builds instead of digs. All damage radii are 1.5× by design;
+the circles are telegraphed on screen before anything detonates, so bigger danger
+stays fair.
+
+The **power dial reaches 200** (`POWER_MAX`; 100 = normal muzzle speed, 200 = 2×).
+High power is a real choice: longer flight, harder to read the wind, and a
+backboarded shot can sail over the target.
+
+The map's **left/right screen borders are open sky** — mountains fade to low
+ground near the edges (`EDGE_OPEN`), so a missile that flies past the border
+flies away; nothing explodes "against the wall".
 
 Example of adding your own in seconds:
 
@@ -81,19 +108,24 @@ Example of adding your own in seconds:
 {
   id: 'mega', name: 'Mega Shot', price: 900, count: 1,
   desc: 'Absurd single blast.', color: '#ff0', trail: 'rgba(255,255,0,0.6)', size: 4,
-  launch: { speedScale: 1.1, gravityScale: 1.0, windScale: 1.0, drag: 0 },
+  launch: { speedScale: 1.1, gravityScale: 1.0, windScale: 1.0, drag: 0, terminal: 0 },
   behavior: 'explode',
-  explosion: { radius: 95, damage: 100, crater: 0.95 },   // craterY optional
+  explosion: { radius: 95, damage: 100, crater: 1.0 },   // craterY optional
 }
 ```
 
 ## Controls
 
-- **Drag on the field** to aim & fire, or: ←/→ angle, ↑/↓ power, **Space** fire,
-  **1–6** select ammo, **A/D** drive.
+- **Drag on the field** to aim & fire, or: **←/→** barrel angle (← aims left),
+  **↑/↓** power (1–200), **Space** fire, **1–6** select ammo, **A/D** drive.
 - Your aim (angle/power) and chosen ammo **carry over to your next turn** —
   correct like a real artillery spotter instead of re-dialing from scratch.
-- Setup screen picks players (HUMAN/CPU mix), seat names, and battle count.
+- Setup screen picks players (HUMAN/CPU mix), seat names, and battle count —
+  and **remembers them** (browser localStorage), so the next start opens with
+  your usual table already dialed in.
+- The player strip (health / fuel / money / ammo for everyone) lives along the
+  **bottom of the screen** so it never covers the leftmost tank; the event log
+  sits above it on the right.
 
 ## The CPU (and how to make it nicer or meaner)
 
@@ -118,7 +150,8 @@ Set them near zero for a brutal tournament CPU, raise them for a fun-beatable on
 The engine is DOM-free, so the whole game can be simulated headless:
 
 ```sh
-node test/sim.js      # terrain invariants, every weapon, strict turn order,
+node test/sim.js      # terrain invariants, open map borders, every weapon incl.
+                      # liquid-fire flow/kill rules, power cap, strict turn order,
                       # multi-battle match flow, 5 seeded full matches + an 8P match
 node test/stress.js   # 40 seeded matches: all must terminate
 ```
@@ -127,8 +160,8 @@ node test/stress.js   # 40 seeded matches: all must terminate
 
 | File | What lives there |
 |---|---|
-| `js/config.js` | **every tunable** — physics, economy, terrain stability, the ammo table |
-| `js/terrain.js` | pixel terrain: one bit per pixel, hole collapse + slope slumping |
+| `js/config.js` | **every tunable** — physics, economy, terrain stability, fire fluid, the ammo table |
+| `js/terrain.js` | pixel terrain: one bit per pixel, hole collapse + slope slumping, liquid-fire fluid |
 | `js/weapons.js` | projectile behaviors shared by all ammo definitions |
 | `js/game.js` | match/battle/turn state machine, resolution order, economy |
 | `js/ai.js` | CPU aiming (trajectory sampling against terrain) and shopping |

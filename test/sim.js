@@ -2,7 +2,8 @@
  * HEADLESS SIMULATION TEST — loads only the DOM-free engine modules and:
  *  1. terrain invariants: gen / dig / add / ALL holes collapse /
  *     slope slumping / mass conservation / wide-shallow crater scaling
- *  2. every weapon behavior (blast, cluster, roller, multiblast, dirt)
+ *  2. every weapon behavior (blast, cluster+small bomblet blasts, roller,
+ *     multiblast, dirt-add, napalm liquid fire) + fire hazard flow/kill rules
  *  3. ammunition ↔ terrain interaction through the real turn pipeline:
  *     blast circles grow BEFORE damage, ground changes only at resolve,
  *     then settle, then tanks
@@ -38,6 +39,20 @@ for (let x = 0; x < CFG.W; x++) {
 }
 check('generate: sane columns, solid floor', ok);
 
+/* OPEN BORDER: mountains must fade to low ground near the screen edges,
+   and beyond the edges there is only sky — the border never stops a missile */
+{
+  let okE = true, worst = '';
+  for (const seed of [42, 7, 77, 101]) {
+    const tE = new SE.Terrain(CFG.W, CFG.H);
+    tE.generate(SE.util.mulberry32(seed));
+    const low = CFG.H - 140;
+    if (tE.top(0) < low || tE.top(CFG.W - 1) < low) { okE = false; worst = 'seed ' + seed + ' edges too high'; }
+    if (tE.solid(-3, 400) || tE.solid(CFG.W + 3, 400) || tE.solid(-3, CFG.H - 1)) { okE = false; worst = 'seed ' + seed + ' border is a wall'; }
+  }
+  check('map edges fade to low open ground; beyond them is sky', okE, worst);
+}
+
 const before = terr.countSolid();
 terr.dig(500, terr.tops[500] + 10, 40);
 check('dig removes pixels', terr.countSolid() < before);
@@ -47,10 +62,10 @@ terr.add(200, terr.tops[200] - 20, 30, 0);
 check('add creates ground', terr.countSolid() > mid);
 
 let massBefore = terr.countSolid(), passes = 0;
-while (terr.settleStep() && passes < 3000) passes++;
+while (terr.settleStep() && passes < 9000) passes++;
 let maxSlope = 0;
 for (let x = 0; x < CFG.W - 1; x++) maxSlope = Math.max(maxSlope, Math.abs(terr.tops[x] - terr.tops[x + 1]));
-check('settling converges', passes < 3000, 'passes=' + passes);
+check('settling converges', passes < 9000, 'passes=' + passes);
 check('final slope <= repose', maxSlope <= CFG.REPOSE, 'max=' + maxSlope);
 check('settling conserves mass', terr.countSolid() === massBefore,
   terr.countSolid() + ' vs ' + massBefore);
@@ -70,13 +85,13 @@ t5.dig(cx5, top5 + 35, 20);          // cave at depth 15 → solid roof remains
 const mass5 = t5.countSolid();
 const roofBefore = t5.tops[cx5];
 let p5 = 0;
-while (t5.settleStep() && p5 < 3000) p5++;
+while (t5.settleStep() && p5 < 9000) p5++;
 check('roof above a cave falls into it', t5.tops[cx5] > roofBefore,
   'top ' + roofBefore + ' → ' + t5.tops[cx5]);
 check('cave collapse conserves mass', t5.countSolid() === mass5,
   t5.countSolid() + ' vs ' + mass5);
 
-/* craterY squashes craters vertically (napalm: wide scar, shallow dig) */
+/* craterY squashes craters vertically (vertical squash factor of dig) */
 function dugAmount(seed, ys) {
   const t = new SE.Terrain(CFG.W, CFG.H);
   t.generate(SE.util.mulberry32(seed));
@@ -108,6 +123,36 @@ check('craterY=0.55 digs a shallower wide crater', dugFlat < dugFull * 0.75,
   check('projectile stops at the real surface, not at the map bottom',
     !!hit && hit.y < t7.tops[300] + 6 && hit.y < CFG.H - 60,
     'y=' + (hit ? hit.y.toFixed(1) : 'none') + ' (floor at ' + CFG.H + ')');
+}
+
+/* the explosion circle destroys ALL ground it covers (crater = full radius) */
+{
+  const t8 = new SE.Terrain(CFG.W, CFG.H);
+  t8.generate(SE.util.mulberry32(7));
+  let px = -1;
+  for (let x = 300; x < 700; x++) {
+    if (t8.H - t8.tops[x] > 170) { px = x; break; }
+  }
+  const py = t8.tops[px] + 60;
+  t8.dig(px, py, 50, 1);
+  let left = 0;
+  for (let dy = -46; dy <= 46; dy++) {
+    for (let dx = -46; dx <= 46; dx++) {
+      if (dx * dx + dy * dy <= 46 * 46 && t8.solid(px + dx, py + dy)) left++;
+    }
+  }
+  check('a blast circle leaves NO ground inside itself', left === 0, 'leftover px=' + left);
+}
+
+/* ground FALLS at a visible, limited speed — never teleports in one frame */
+{
+  const t9 = new SE.Terrain(CFG.W, CFG.H);
+  t9.generate(SE.util.mulberry32(8));
+  t9.dig(500, t9.tops[500] + 30, 25);          // cave: roof must start sinking
+  const before = t9.tops[500];
+  t9.settleStep();                              // ONE pass only
+  check('soil drops at most FALL_RATE px per settling pass',
+    t9.tops[500] - before <= CFG.FALL_RATE, 'dropped ' + (t9.tops[500] - before) + ' px in one pass');
 }
 
 /* ---------------- 2. weapon behaviors ---------------- */
@@ -151,14 +196,48 @@ check('dirt bomb adds ground instead of digging',
   r.events.some(function (e) { return e.type === 'add'; }));
 
 r = runProj(SE.Weapons.create('napalm', 200, 200, 45, 7, 0), 600);
-check('napalm passes craterY through to the blast event',
-  r.events.some(function (e) { return e.type === 'blast' && e.craterY === 0.55; }));
+check('napalm pours LIQUID FIRE — no blast, no crater, just the fire event',
+  r.events.some(function (e) { return e.type === 'fire' && e.radius >= 60 && e.depth > 0 && e.life >= 240; }) &&
+  !r.events.some(function (e) { return e.type === 'blast'; }),
+  JSON.stringify(r.events.map(function (e) { return e.type; })));
 
-// bomblets: they interact with the terrain but NEVER detonate
+// bomblets: they now DO detonate — in small blasts — and drift down slowly
 r = runProj(SE.Weapons.create('clusterlet', 300, 100, 60, 6, 0), 600);
-check('bomblets thud into terrain without any blast',
-  r.events.every(function (e) { return e.type !== 'blast'; }) &&
-  r.events.some(function (e) { return e.type === 'fx' && e.kind === 'spark'; }));
+check('bomblets explode in SMALL blasts (area weapon again)',
+  r.events.some(function (e) { return e.type === 'blast' && e.radius <= 40 && e.radius >= 12; }),
+  JSON.stringify(r.events.map(function (e) { return e.type; })));
+
+// their fall speed is capped, so bomblets DRIFT instead of dropping like stones
+{
+  const p = SE.Weapons.create('clusterlet', 500, 30, -90, 0, 0);
+  const ctx = { terrain: terr, tanks: [], wind: 0, W: CFG.W, spawn: function () {} };
+  const ev = [];
+  let maxVy = 0;
+  for (let f = 0; f < 400 && !p.dead; f++) { SE.Weapons.step(p, ctx, ev); maxVy = Math.max(maxVy, p.vy); }
+  const term = SE.weaponById('clusterlet').launch.terminal;
+  check('bomblet fall speed is capped by launch.terminal — they drift',
+    term > 0 && maxVy > 1 && maxVy <= term + 1e-9, 'maxVy=' + maxVy.toFixed(3) + ' cap=' + term);
+}
+
+// every explosive weapon clears its ENTIRE damage circle
+check('all explosive weapons dig with crater factor 1.0 (full circle)',
+  SE.WEAPONS.every(function (w) {
+    if (w.behavior === 'explode') return w.explosion.crater >= 0.999;
+    if (w.behavior === 'roll') return w.roll.explode.crater >= 0.999;
+    if (w.behavior === 'multiblast') return w.blasts.every(function (b) { return b.crater >= 0.999; });
+    return true;   // thud / cluster parent / addground / fire: no digging blast of their own
+  }));
+
+// muzzle speed: the power dial may reach POWER_MAX; 200 = exactly 2× of 100
+{
+  const b = SE.weaponById('basic');
+  const s100 = SE.Weapons.speedOf(b, 100), s200 = SE.Weapons.speedOf(b, 200);
+  check('power 200 = 2× the muzzle speed of power 100 (POWER_MAX)',
+    Math.abs(s200 - 2 * s100) < 1e-9 && CFG.POWER_MAX >= 200,
+    's100=' + s100 + ' s200=' + s200);
+  check('power above POWER_MAX is clamped',
+    SE.Weapons.speedOf(b, 999) === s200);
+}
 
 /* ---------------- 3. turn pipeline: strict order + terrain effects ------ */
 console.log('[turn pipeline]');
@@ -173,6 +252,102 @@ function bareGame(seed) {                 // 2 humans, 1 battle, at first turn
   g.endCurrentBuyer();
   g.endCurrentBuyer();
   return g;                              // state: aim, seat 0
+}
+
+/* ---------------- liquid fire hazard (napalm): flow / burn / hurt -------- */
+console.log('[fire hazard]');
+
+/* the fluid itself: it runs down the mountain, pools low, then burns out.
+   The flow test uses a SETTLED map — that is what the engine presents
+   after any shot — raw generation has cliff ridges that legitimately dam
+   a fluid whose surface is below the ridge ground. */
+{
+  const T = new SE.Terrain(CFG.W, CFG.H);
+  T.generate(SE.util.mulberry32(61));
+  let nS = 0; while (T.settleStep() && nS++ < 9000);
+  let px = -1, ptop = 1e9;
+  for (let x = 150; x < 850; x++) if (T.tops[x] < ptop) { ptop = T.tops[x]; px = x; }
+  T.addFire(px, 30, 12, 900, 0);
+  for (let i = 0; i < 160; i++) T.stepFire();
+  let spread = 0;
+  for (let x = Math.max(0, px - 100); x <= Math.min(CFG.W - 1, px + 100); x++)
+    if (Math.abs(x - px) >= 10) spread = Math.max(spread, T.fire[x]);
+  check('liquid fire runs DOWN the mountain away from its pour point',
+    spread >= 1 && T.fire[px] < 2,
+    'downhill=' + spread.toFixed(1) + ' center=' + T.fire[px].toFixed(1));
+  let far = -1, fmax = 0;
+  for (let x = px + 10; x < Math.min(CFG.W, px + 200); x++) if (T.fire[x] > fmax) { fmax = T.fire[x]; far = x; }
+  check('fire pools where the ground is LOW — not on the peak it was dropped on',
+    fmax > 2 && T.tops[far] > ptop + 20,
+    'pool@' + far + ' depth=' + fmax.toFixed(1) + ' ground ' + T.tops[far] + ' vs peak ' + ptop);
+  for (let i = 0; i < 1500; i++) T.stepFire();
+  check('fire burns out completely after its life runs out', !T.hasFire());
+}
+
+/* the hazard: submersion kills, shallow contact burns over time.
+   We carve a FLAT-bottomed basin so the fluid behaves predictably. */
+function levelBasin(T, cx, halfW) {
+  let bx = cx, top = -1;
+  for (let x = Math.max(60, cx - halfW); x <= Math.min(CFG.W - 60, cx + halfW); x++)
+    if (T.tops[x] > top) { top = T.tops[x]; bx = x; }
+  const fy = T.tops[bx];
+  for (let x = bx - 60; x <= bx + 60; x++) {
+    for (let y = T.tops[x]; y < fy; y++) T.data[y * T.W + x] = 0;
+    T.refreshTop(x);
+  }
+  return bx;
+}
+{
+  const g = bareGame(51);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150);
+  const v = g.players[1];
+  v.x = bx; v.y = T.top(bx);
+  T.addFire(bx, 40, 15, 600, 0);        // deep pool right on the tank
+  g._tickFire();
+  check('tank FULLY SUBMERGED in fire dies; credit goes to the fire owner',
+    !v.alive && g.players[0].kills === 1 && v.deathRank > 0,
+    'alive=' + v.alive + ' kills=' + g.players[0].kills);
+  check('battle with only one tank left ends immediately',
+    g.aliveCount() <= 1 && (g.state === 'between' || g.state === 'over'),
+    'state=' + g.state);
+}
+{
+  const g = bareGame(53);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150);
+  const v = g.players[1];
+  v.x = bx; v.y = T.top(bx);
+  T.addFire(bx, 78, 8, 3000, 0);        // shallow (8 < TANK_H): burns, never drowns
+  for (let i = 0; i < CFG.FIRE_TICK; i++) g._tickFire();
+  check('touching fire hurts once per FIRE_TICK frames (damage over time)',
+    v.alive && v.hp === CFG.HP - CFG.FIRE_DOT, 'hp=' + v.hp + ' alive=' + v.alive);
+  check('shallow fire never instant-kills (depth stays under TANK_H)',
+    (() => { for (let x = bx - 10; x <= bx + 10; x++) if (T.fire[x] >= CFG.TANK_H) return false; return true; })());
+  let guard = 0;
+  while (v.alive && guard++ < 900) g._tickFire();
+  check('sustained contact with the fire pool eventually kills the tank',
+    !v.alive && g.players[0].kills === 1);
+}
+{
+  const g = bareGame(57);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150);
+  const v = g.players[1];
+  v.x = bx; v.y = T.top(bx);
+  v.shield = true;                       // shielded: fire cannot hurt it at all
+  T.addFire(bx, 60, 15, 300, 0);
+  for (let i = 0; i < 30; i++) g._tickFire();
+  check('a shield blocks fire damage (submersion included)',
+    v.alive && v.hp === CFG.HP, 'hp=' + v.hp);
+}
+
+/* power may be raised to POWER_MAX through the game layer too */
+{
+  const g = bareGame(59);
+  g.aimTo(0, 90, 9999);
+  check('game.aimTo caps power at POWER_MAX', g.players[0].power === CFG.POWER_MAX,
+    'power=' + g.players[0].power);
 }
 
 /* blast circles grow BEFORE the ground is touched */
@@ -255,6 +430,57 @@ function bareGame(seed) {                 // 2 humans, 1 battle, at first turn
     'now ' + g.players[0].angle + '/' + g.players[0].power);
 }
 
+/* a tank fully inside the blast circle takes FULL damage — and battle-end
+   pay is exactly base + $100 per enemy outlasted */
+{
+  const g = bareGame(77);
+  const a = g.players[0], b = g.players[1];
+  b.x = 400; b.y = g.terrain.top(400);
+  g.applyBlast({ x: 400, y: b.y - CFG.TANK_H / 2, radius: 60, damage: 100, crater: 0, owner: null });
+  check('tank fully inside the circle takes the weapon\'s FULL 100',
+    !b.alive && b.hp === 0, 'hp=' + b.hp);
+  g._endOfBattle();          // end the battle the same way the resolve pipeline would
+  check('outlast pay is exact: winner gets base + $100 (outlasted 1), dead gets base only',
+    a.money === CFG.START_MONEY + CFG.BATTLE_BASE_PAY + CFG.OUTLAST_PAY &&
+    b.money === CFG.START_MONEY + CFG.BATTLE_BASE_PAY,
+    'a=' + a.money + ' b=' + b.money);
+}
+{
+  const g = bareGame(78);
+  const b = g.players[1];
+  b.x = 600; b.y = g.terrain.top(600); b.shield = true;
+  g.applyBlast({ x: 600, y: b.y - CFG.TANK_H / 2, radius: 60, damage: 100, crater: 0, owner: null });
+  check('shielded this turn: swallowed by the circle, zero damage',
+    b.alive && b.hp === CFG.HP);
+}
+{
+  const g = bareGame(79);
+  const b = g.players[1];
+  b.x = 700; b.y = g.terrain.top(700);
+  // centre sits clearly OUTSIDE the tank (nearest edge 55px, radius 60) → partial bite only
+  g.applyBlast({ x: 765, y: b.y - CFG.TANK_H / 2, radius: 60, damage: 100, crater: 0, owner: null });
+  check('partially inside the circle: hurt, but not the full amount',
+    b.alive && b.hp > 0 && b.hp < CFG.HP, 'hp=' + b.hp);
+}
+
+/* no two tanks can ever spawn next to each other — slot placement */
+{
+  let worst = Infinity;
+  for (const n of [2, 3, 4, 5, 6, 7, 8]) {
+    for (const seed of [7, 21, 99]) {
+      const g = new SE.Game({ seed: seed, seats: seatset(n), battles: 1 });
+      g.start();
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          worst = Math.min(worst, Math.abs(g.players[i].x - g.players[j].x));
+        }
+      }
+    }
+  }
+  check('tanks never spawn touching each other (closest pair >= 85px)',
+    worst >= 85, 'closest pair was ' + worst + ' px apart');
+}
+
 /* ---------------- 4. full matches to termination ---------------- */
 console.log('[full matches]');
 function playMatch(seed, seats, battles, maxTicks) {
@@ -304,16 +530,33 @@ check('8-player 2-battle match terminates', res8.g.state === 'over', 'ticks=' + 
 
 /* multi-battle structure: 2 battles, fresh everything, money carries over */
 {
-  let moneyAtBattle2Start = -1, moneyAtBattle1End = -1, winPays = 0, decisive = 0;
+  let moneyAtBattle2Start = -1, moneyAtBattle1End = -1, decisive = 0;
+  let payoutsOk = true, paidList = [];
   const g0 = new SE.Game({ seed: 3141, seats: seatset(3), battles: 2 });
   g0.on('battleStart', function (e) {
     if (e.battle === 2) moneyAtBattle2Start = g0.players.reduce(function (a, p) { return a + p.money; }, 0);
   });
+  g0.on('money', function (e) { if (e.reason === 'battle') paidList.push(e); });
   g0.on('battleEnd', function (e) {
+    // every tank must have been paid exactly: base + OUTLAST × enemies it outlived
+    const seq = g0.battleDeathSeq;
+    let wantN = 0, wantTotal = 0;
+    for (const p of g0.players) {
+      const rank = p.alive ? seq + 1 : (p.deathRank || 0);
+      let out = 0;
+      for (const q of g0.players) {
+        if (q.id === p.id) continue;
+        const qr = q.alive ? seq + 1 : (q.deathRank || 0);
+        if (qr < rank) out++;
+      }
+      wantTotal += CFG.BATTLE_BASE_PAY + CFG.OUTLAST_PAY * out; wantN++;
+    }
+    const gotTotal = paidList.reduce(function (sum, m) { return sum + m.amount; }, 0);
+    if (paidList.length !== wantN || gotTotal !== wantTotal) payoutsOk = false;
+    paidList = [];
     if (e.battle === 1) moneyAtBattle1End = g0.players.reduce(function (a, p) { return a + p.money; }, 0);
     if (e.winnerId != null) decisive++;
   });
-  g0.on('money', function (e) { if (e.reason === 'win') winPays++; });
   const info = { battleEnds: [], battleStarts: [] };
   g0.on('battleStart', function (e) { info.battleStarts.push(e.battle); });
   g0.on('battleEnd', function (e) { info.battleEnds.push(e); });
@@ -334,7 +577,7 @@ check('8-player 2-battle match terminates', res8.g.state === 'over', 'ticks=' + 
   check('money carries over unchanged between battles',
     moneyAtBattle2Start === moneyAtBattle1End,
     'battle2 start=' + moneyAtBattle2Start + ' battle1 end=' + moneyAtBattle1End);
-  check('battle winners were paid', winPays === decisive, 'winPays=' + winPays + ' decisive=' + decisive);
+  check('every battle paid all tanks exactly base + outlast bonuses', payoutsOk);
   console.log('       battles=2 moneyAtBattle2=' + moneyAtBattle2Start +
     ' wins=' + g.battleWins.join(','));
 }

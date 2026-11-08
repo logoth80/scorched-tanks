@@ -31,7 +31,6 @@ class Renderer {
     this._paintTerrainAll();
 
     this.particles = [];
-    this.burns = [];
     this.floaters = [];
     this.shake = 0;
     this.time = 0;
@@ -105,11 +104,22 @@ class Renderer {
             vy: Math.sin(a) * sp - 1, ttl: 44 + Math.random() * 36, t: 0,
           });
         }
-        if (e.burn) this.burns.push({ x: e.x, y: e.y, r: e.r * 0.8, ttl: e.burn, t: 0 });
+
         if (e.r > 55) this.shake = Math.max(this.shake, 10);
         break;
       }
-      case 'spark':   // bomblet hit: a small spark, no explosion at all
+      case 'fire':   // napalm hit: a splash of burning liquid
+        for (let i = 0; i < 24; i++) {
+          const a = Math.random() * Math.PI;
+          const sp = 1.2 + Math.random() * 3.2;
+          this.particles.push({
+            k: 'drop', x: e.x, y: e.y,
+            vx: Math.cos(a) * sp * 1.6, vy: -Math.sin(a) * sp,
+            ttl: 26 + Math.random() * 18, t: 0,
+          });
+        }
+        break;
+      case 'spark':   // a small hit with no explosion
         this.particles.push({ k: 'spark', x: e.x, y: e.y, ttl: 14, t: 0 });
         for (let i = 0; i < 4; i++) {
           this.particles.push({ k: 'dust', x: e.x, y: e.y,
@@ -168,8 +178,8 @@ class Renderer {
     ctx.translate(ox, oy);
 
     ctx.drawImage(this.sky, 0, 0);
-    this._drawBurns();
     ctx.drawImage(this.tcv, 0, 0);
+    this._drawFire();             // burning fluid hugs the ground, tanks wade/are swallowed by it
     this._drawWindFlag();
 
     for (const t of game.players) if (t.alive) this._drawTank(t);
@@ -368,19 +378,31 @@ class Renderer {
   }
 
   /* ---------- burns / particles / floaters ---------- */
-  _drawBurns() {
-    const ctx = this.ctx;
-    this.burns = this.burns.filter(function (b) { return (b.t++ < b.ttl); });
-    for (const b of this.burns) {
-      const f = 1 - b.t / b.ttl;
-      for (let i = 0; i < 3; i++) {
-        const ox = (Math.random() - 0.5) * b.r * 1.4;
-        const oy = -Math.random() * 6;
-        const rr = 3 + Math.random() * b.r * 0.18;
-        ctx.fillStyle = 'rgba(255,' + (90 + Math.random() * 70 | 0) + ',30,' + (0.25 * f + 0.05) + ')';
-        ctx.beginPath(); ctx.arc(b.x + ox, b.y + oy, rr, 0, 7); ctx.fill();
+  /* liquid fire (napalm): per-column burning fluid depth from terrain.fire,
+     drawn as a dense molten body with bright flickering tips */
+  _drawFire() {
+    const T = this.game.terrain, ctx = this.ctx;
+    const fire = T.fire;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let x = 0; x < T.W; x++) {
+      const d = fire[x];
+      if (d < 0.2) continue;
+      const ty = T.tops[x];
+      if (ty >= T.H) continue;
+      const flick = 1 + 0.10 * Math.sin(this.time * 0.35 + x * 0.7) +
+                    0.08 * Math.sin(this.time * 0.13 + x * 2.3);
+      const h = Math.min(d * flick, 60);
+      ctx.fillStyle = 'rgba(235,84,20,0.55)';                 // burning fluid body
+      ctx.fillRect(x, ty - h, 1, h);
+      ctx.fillStyle = 'rgba(255,205,80,0.45)';                // bright surface film
+      ctx.fillRect(x, ty - h, 1, Math.min(h, 5 + d * 0.4));
+      if ((x * 13 + this.time) % 19 === 0 && h > 3) {        // occasional flame tongue
+        ctx.fillStyle = 'rgba(255,236,150,0.4)';
+        ctx.fillRect(x, ty - h - 11 - (d | 0), 1, 13);
       }
     }
+    ctx.restore();
   }
 
   _drawParticles() {
@@ -409,6 +431,13 @@ class Renderer {
             ? 'rgba(' + G.r + ',' + G.g + ',' + G.b + ',' + (1 - f) + ')'
             : 'rgba(200,180,150,' + (0.6 * (1 - f)) + ')';
           ctx.fillRect(p.x, p.y, s, s);
+          break;
+        }
+        case 'drop': {   // burning napalm droplet — bright while it flies
+          p.x += p.vx; p.y += p.vy; p.vy += 0.3;
+          p.vx *= 0.99;
+          ctx.fillStyle = 'rgba(255,' + (120 + ((1 - f) * 100 | 0)) + ',40,' + (1 - f * 0.7) + ')';
+          ctx.fillRect(p.x, p.y, 2, 2);
           break;
         }
         case 'muzzle': {

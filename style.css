@@ -11,7 +11,7 @@ body { display: flex; align-items: center; justify-content: center; }
 }
 #game { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
 
-#hud { position: absolute; inset: 0; pointer-events: none; }
+#hud { position: absolute; inset: 0; pointer-events: none; --stripH: 64px; }
 #hud button { pointer-events: auto; cursor: pointer; }
 #hud .hidden { display: none !important; }
 
@@ -29,35 +29,41 @@ body { display: flex; align-items: center; justify-content: center; }
 #windBox b { font-size: 15px; }
 #roundLabel { color: #9fb4cc; }
 
-/* ---------------- player cards ---------------- */
+/* ---------------- player cards — full-width strip along the bottom.
+   The old top-left column used to cover the leftmost tank; the strip
+   only overlaps deep soil at the very bottom edge of the battlefield. -- */
 #playerCards {
-  position: absolute; top: 40px; left: 8px; width: 190px;
-  display: flex; flex-direction: column; gap: 5px;
+  position: absolute; left: 0; right: 0; bottom: 0; min-height: var(--stripH);
+  display: flex; flex-direction: row; flex-wrap: nowrap; gap: 5px;
+  align-items: stretch; justify-content: center; padding: 5px 6px;
+  background: linear-gradient(0deg, rgba(8,10,16,.92), rgba(8,10,16,.55) 70%, transparent);
 }
 .card { background: rgba(10,14,20,.72); border: 1px solid #263141;
-  border-radius: 6px; padding: 5px 7px; }
+  border-radius: 6px; padding: 4px 7px 5px; flex: 1 1 0; min-width: 0; max-width: 190px; }
 .card.active { outline: 2px solid #7fb2d9; }
 .card.dead { opacity: .35; filter: grayscale(1); }
 .cHead { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.cHead b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .cHead span:first-child, .oRow span { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-.cMoney { margin-left: auto; color: #8ee08e; font-weight: 700; }
+.cMoney { margin-left: auto; color: #8ee08e; font-weight: 700; flex: none; }
 .bar { height: 5px; background: #1a222e; border-radius: 3px; margin-top: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; }
 .bar.fuel i { background: #5b8dd9; }
-.cAmmo { font-size: 10px; color: #93a7bf; margin-top: 3px; word-break: break-word; }
+.cAmmo { font-size: 10px; color: #93a7bf; margin-top: 3px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 
-/* ---------------- event log ---------------- */
-#log { position: absolute; left: 8px; bottom: 96px; width: 300px;
-  font: 11px/1.5 monospace; color: #b8c6d8; }
+/* ---------------- event log — right side, above the card strip ---------------- */
+#log { position: absolute; right: 10px; bottom: calc(var(--stripH, 64px) + 8px); width: 280px;
+  font: 11px/1.5 monospace; color: #b8c6d8; text-align: right; }
 .logLine { text-shadow: 0 1px 2px #000; }
 .logLine.kill { color: #ff9a8a; }
 .logLine.buy { color: #8ee08e; }
 .logLine.hit { color: #e8c86a; }
 .logLine.sys { color: #7fb2d9; font-weight: 700; }
 
-/* ---------------- turn panel ---------------- */
+/* ---------------- turn panel — sits above the card strip ---------------- */
 #turnpanel {
-  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: calc(var(--stripH, 64px) + 6px); transform: translateX(-50%);
   width: min(640px, 96%); background: rgba(10,14,20,.85);
   border: 1px solid #2c3949; border-radius: 10px; padding: 8px 12px;
   pointer-events: auto;
@@ -97,6 +103,9 @@ body { display: flex; align-items: center; justify-content: center; }
 .mbox h1, .mbox h2 { margin: 0 0 6px; }
 .mbox .dot { width: 13px; height: 13px; border-radius: 3px; background: #888; display: inline-block; }
 .money { color: #8ee08e; }
+.money.nope { color: #ff8078; animation: nope .4s ease; }
+@keyframes nope { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); } 75% { transform: translateX(-3px); } }
 button.big { background: #2f5d8a; border: 1px solid #4d84b8; color: #eaf2fa;
   font-size: 15px; font-weight: 700; padding: 9px 18px; border-radius: 8px; margin-top: 10px; }
 button.big:hover { background: #3a72a8; }
@@ -122,6 +131,7 @@ input[type=number] { width: 56px; background: #1c2634; color: #dfe6ee;
   padding: 9px 11px; cursor: pointer; }
 .shopCard:hover { background: #223041; }
 .shopCard.off { opacity: .4; cursor: default; }
+.shopCard.free { opacity: .85; cursor: default; border-style: dashed; }
 .shopCard b { color: #eaf2fa; }
 .sDesc { color: #8fa4bd; font-size: 11px; min-height: 30px; margin: 4px 0; }
 .sFoot { display: flex; justify-content: space-between; color: #93a7bf; font-size: 11px; }

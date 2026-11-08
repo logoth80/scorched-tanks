@@ -52,6 +52,7 @@ const Sfx = {
     this._tone(60 - big * 25, 0.3, 0.35, 'sine');
   },
   click() { this._tone(1200, 0.04, 0.08, 'square'); },
+  deny() { this._tone(150, 0.1, 0.16, 'square'); this._tone(120, 0.12, 0.12, 'square'); },
   buy() { this._tone(880, 0.07, 0.1); this._tone(1320, 0.07, 0.08); },
   chime() { this._tone(660, 0.12, 0.1, 'triangle'); this._tone(990, 0.18, 0.08, 'triangle'); },
   chute() { this._noise(0.25, 2400, 0.25, 'highpass'); },

@@ -3,14 +3,15 @@
  * A projectile is just data; what it DOES is chosen by `def.behavior`.
  * Behaviors implemented here — new weapons from config reuse them:
  *   'explode'     fly → single blast
- *   'thud'        fly → lands with a small spark, NO explosion (bomblets)
+ *   'thud'        fly → lands with a small spark, NO explosion
  *   'cluster'     fly → split at the apex into child projectiles
  *   'roll'        fly → land → roll down the mountain → blast when stopped
  *   'multiblast'  fly → 3 staggered blasts (Big Bomb)
  *   'addground'   fly → builds a mound of dirt instead of digging (Dirt Bomb)
+ *   'fire'        fly → pour liquid fire (flows downhill, burns for a while)
  *
  * step(p, ctx, out) pushes events into `out` which the game applies:
- *   {type:'blast'|'add'|'direct'|'fx'|'despawn'}
+ *   {type:'blast'|'add'|'fire'|'direct'|'fx'|'despawn'}
  * ctx = { terrain, tanks, wind, W } and ctx.spawn() adds child projectiles.
  * ===================================================================== */
 (function (root) {
@@ -37,7 +38,8 @@ const Weapons = {
 
   speedOf(def, power) {
     const s = (def.launch.speedScale || 1);
-    return (U.clamp(power, 1, 100) / 100) * CFG.MAX_SPEED * s;
+    // power is on the config dial (default max 200); 100 = MAX_SPEED
+    return (U.clamp(power, 1, CFG.POWER_MAX || 100) / 100) * CFG.MAX_SPEED * s;
   },
 
   step(p, ctx, out) {
@@ -61,6 +63,7 @@ const Weapons = {
     p.vy += CFG.GRAVITY * (L.gravityScale || 1);
     p.vx += ctx.wind * CFG.WIND_ACCEL * (L.windScale || 1);
     if (L.drag) { p.vx *= (1 - L.drag); p.vy *= (1 - L.drag); }
+    if (L.terminal && p.vy > L.terminal) p.vy = L.terminal;  // parachute-style fall cap
     const sp = Math.hypot(p.vx, p.vy);
     if (sp > CFG.SPEED_CLAMP) { p.vx *= CFG.SPEED_CLAMP / sp; p.vy *= CFG.SPEED_CLAMP / sp; }
 
@@ -122,6 +125,12 @@ const Weapons = {
       out.push({ type: 'blast', x: p.x, y: p.y, owner: p.owner,
         radius: def.explosion.radius, damage: def.explosion.damage,
         crater: def.explosion.crater });
+      return;
+    }
+    if (b === 'fire') {   // napalm: no blast — pour burning liquid along the ground
+      out.push({ type: 'fire', x: p.x, y: p.y, owner: p.owner,
+        radius: def.fire.radius, depth: def.fire.depth, life: def.fire.life });
+      out.push({ type: 'fx', kind: 'fire', x: p.x, y: p.y });
       return;
     }
     // default: plain explosion

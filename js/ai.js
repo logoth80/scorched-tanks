@@ -23,6 +23,8 @@ function blastRadius(def) {
   if (def.behavior === 'multiblast') {
     let m = 0; for (const b of def.blasts) m = Math.max(m, b.radius); return m;
   }
+  if (def.behavior === 'fire') return def.fire.radius;      // fire pool (flows!)
+  if (def.behavior === 'cluster') return 55;                // bomblets cover a wide patch
   return (def.explosion && def.explosion.radius) || 0;
 }
 
@@ -52,16 +54,16 @@ const AI = {
     const my = shooter.y - CFG.TANK_H + 3;
     const selfX = shooter.x, selfY = shooter.y - CFG.TANK_H / 2;
     const dangerR = blastRadius(def) * 0.8;
-    const isThud = def.behavior === 'thud' || def.behavior === 'cluster';
+    const isThud = def.behavior === 'thud';
 
+    const PMAX = CFG.POWER_MAX || 100;
     const cands = [];
     const self = this;
     function consider(angle, power) {
-      if (angle < 2 || angle > 178 || power < 5 || power > 100) return;
+      if (angle < 2 || angle > 178 || power < 5 || power > PMAX) return;
       const res = self._simulate(terrain, W, perceivedWind, mx, my, angle,
         SE.Weapons.speedOf(def, power), def, target);
       if (!res.landed) return;
-      // bomblets never detonate — only the PATH passing through the tank counts
       const dLand = Math.hypot(res.x - target.x, res.y - (target.y - CFG.TANK_H / 2));
       let d = isThud ? Math.min(dLand, res.nearest) : dLand;
       // do not park our own blast on top of ourselves
@@ -85,7 +87,7 @@ const AI = {
     // so terrain changes / new positions never strand the local memory
     let coarseBest = null;
     for (let angle = 15; angle <= 165; angle += 5) {
-      for (let power = 35; power <= 100; power += 12) {
+      for (let power = 35; power <= PMAX; power += 12) {
         const before = cands.length;
         consider(angle, power);
         for (let i = before; i < cands.length; i++) {
@@ -122,7 +124,7 @@ const AI = {
     const top = cands.slice(0, CFG.AI_TOPK);
     const pick = top[Math.floor(Math.random() * top.length)];
     const angle = U.clamp(pick.angle + (Math.random() * 2 - 1) * CFG.AI_JITTER_ANGLE, 2, 178);
-    const power = U.clamp(pick.power + (Math.random() * 2 - 1) * CFG.AI_JITTER_POWER, 10, 100);
+    const power = U.clamp(pick.power + (Math.random() * 2 - 1) * CFG.AI_JITTER_POWER, 10, PMAX);
     return { weaponId: weaponId, angle: angle, power: power };
   },
 
@@ -132,10 +134,6 @@ const AI = {
     });
     if (!owned.length || Math.random() > 0.65) return 'basic';
     const pick = owned[Math.floor(Math.random() * owned.length)];
-    const def = SE.weaponById(pick);
-    // cluster bomblets never explode — only worth it as a spread of
-    // direct-hit chances, so save it for genuinely close targets
-    if (def.behavior === 'cluster' && Math.abs(target.x - shooter.x) > 420) return 'basic';
     return pick;
   },
 
@@ -149,6 +147,7 @@ const AI = {
     for (let t = 0; t < 1200; t++) {
       vy += g; vx += wf;
       if (def.launch.drag) { vx *= (1 - def.launch.drag); vy *= (1 - def.launch.drag); }
+      if (def.launch.terminal && vy > def.launch.terminal) vy = def.launch.terminal;
       // sub-step like the real flight so walls are actually seen
       const steps = Math.max(1, Math.ceil(Math.max(Math.abs(vx), Math.abs(vy)) / 2));
       const sx = vx / steps, sy = vy / steps;

@@ -53,6 +53,7 @@ class UI {
         list.appendChild(row);
         this.seatRows.push({ row: row, name: row.querySelector('.seatName'), mode: modeBtn });
       }
+      this._loadSetupPrefs();          // remember last match: players, names, CPU/human
     }
     const n = parseInt(this.el.seatCount.value, 10) || 4;
     this._applySeatCount(n);
@@ -68,6 +69,35 @@ class UI {
       r.row.style.display = i < n ? '' : 'none';
     });
   }
+  _setMode(row, human) {
+    const btn = row.mode;
+    btn.textContent = human ? 'HUMAN' : 'CPU';
+    btn.dataset.mode = human ? 'human' : 'cpu';
+  }
+  /* remembered new-game setup (players count, names, human/CPU, battles) */
+  _loadSetupPrefs() {
+    let prefs = null;
+    try { prefs = JSON.parse(localStorage.getItem('scorchtanks.setup') || 'null'); }
+    catch (e) { prefs = null; }
+    if (!prefs || !Array.isArray(prefs.seats)) return;
+    for (let i = 0; i < this.seatRows.length; i++) {
+      const s = prefs.seats[i];
+      if (!s) continue;
+      if (typeof s.name === 'string' && s.name) this.seatRows[i].name.value = s.name;
+      this._setMode(this.seatRows[i], !!s.human);
+    }
+    if (prefs.battles && this.el.battlesInput) this.el.battlesInput.value = U.clamp(prefs.battles | 0, 1, 9);
+    if (prefs.seatCount) this.el.seatCount.value = U.clamp(prefs.seatCount | 0, CFG.MIN_PLAYERS, CFG.MAX_PLAYERS);
+  }
+  _saveSetupPrefs(setup) {
+    try {
+      localStorage.setItem('scorchtanks.setup', JSON.stringify({
+        seatCount: setup.seats.length,
+        battles: setup.battles,
+        seats: setup.seats,
+      }));
+    } catch (e) { /* private mode / no storage — not important enough to bother the player */ }
+  }
   readSetup() {
     const n = U.clamp(parseInt(this.el.seatCount.value, 10) || 4, CFG.MIN_PLAYERS, CFG.MAX_PLAYERS);
     const battles = U.clamp(parseInt(this.el.battlesInput && this.el.battlesInput.value, 10) ||
@@ -80,7 +110,9 @@ class UI {
         name: r.name.value.trim() || null,
       });
     }
-    return { seats: seats, battles: battles };
+    const setup = { seats: seats, battles: battles };
+    this._saveSetupPrefs(setup);       // next start opens with these settings
+    return setup;
   }
 
   /* ---------------- attach to a game ---------------- */
@@ -97,8 +129,9 @@ class UI {
     });
     game.on('battleEnd', function (e) {
       const w = e.winnerId != null ? game.playerById(e.winnerId) : null;
-      if (w) self._log('Battle ' + e.battle + ': ' + w.name + ' survives and wins it (+$' + CFG.WIN_PAY + ')', 'kill');
-      else self._log('Battle ' + e.battle + ': mutual destruction — no winner', 'sys');
+      if (w) self._log('Battle ' + e.battle + ': ' + w.name + ' outlasts the field! All tanks paid $' +
+        CFG.BATTLE_BASE_PAY + ' + $' + CFG.OUTLAST_PAY + ' per enemy outlasted', 'kill');
+      else self._log('Battle ' + e.battle + ': mutual destruction — no winner, everyone still gets paid', 'sys');
     });
     game.on('round', function (e) {
       self._battleLabel(e.battle, game.totalBattles, e.round);
@@ -144,7 +177,8 @@ class UI {
       self.renderer.addFloater(p.x, p.y - 30, '-' + e.amount, 'rgba(255,120,100,ALPHA)');
       if (e.srcId != null && e.srcId >= 0) {
         const s = game.playerById(e.srcId);
-        if (s.id !== p.id && e.cause !== 'fall')
+        // fire burns tick every few frames — the floaters say it, don't spam the log
+        if (s.id !== p.id && e.cause !== 'fall' && e.cause !== 'fire')
           self._log(s.name + ' hit ' + p.name + ' for ' + e.amount, 'hit');
       }
       SE.sfx.hit();
@@ -152,7 +186,11 @@ class UI {
     game.on('kill', function (e) {
       const v = game.playerById(e.victimId);
       const k = e.killerId != null ? game.playerById(e.killerId) : null;
-      self._log(v.name + ' destroyed' + (k ? ' by ' + k.name : ''), 'kill');
+      if (e.cause === 'fire') {
+        self._log(v.name + ' drowned in burning liquid fire' + (k ? ' — lit by ' + k.name : ''), 'kill');
+      } else {
+        self._log(v.name + ' destroyed' + (k ? ' by ' + k.name : ''), 'kill');
+      }
       self.renderer.addFloater(v.x, v.y - 40, 'KO', 'rgba(255,80,60,ALPHA)');
       SE.sfx.death();
       self._updateCards();
@@ -287,6 +325,34 @@ class UI {
     this.el.shopDone.addEventListener('click', function () {
       if (self.game && self.game.state === 'shop') { self.game.endCurrentBuyer(); SE.sfx.click(); }
     });
+    /* shop purchases — ONE delegated listener on the wrapper. Cards are
+       rebuilt on every render; per-card listeners could go stale, which is
+       exactly the "sometimes clicking does nothing" bug. The decision is
+       made at CLICK time against live state. */
+    this.el.shopItems.addEventListener('click', function (ev) {
+      const g = self.game;
+      if (!g || g.state !== 'shop') return;
+      const cardEl = ev.target.closest ? ev.target.closest('.shopCard') : null;
+      if (!cardEl || !cardEl.dataset.wid) return;
+      const idx = g.shopQueue[0];
+      const buyer = idx !== undefined ? g.players[idx] : null;
+      if (!buyer || !buyer.human) return;
+      if (g.buy(buyer.id, cardEl.dataset.wid)) {
+        SE.sfx.buy();                    // the 'buy' event handler refreshes the modal
+      } else {
+        // cannot afford / already capped → say so instead of staying silent
+        const m = self.el.shopMoney;
+        m.classList.remove('nope');
+        void m.offsetWidth;              // restart CSS flash
+        m.classList.add('nope');
+        m.textContent = '$' + buyer.money + ' — not enough';
+        setTimeout(function () {
+          if (g.state === 'shop') m.textContent = '$' + buyer.money;
+          m.classList.remove('nope');
+        }, 900);
+        SE.sfx.deny();
+      }
+    });
 
     /* keyboard */
     window.addEventListener('keydown', function (ev) {
@@ -300,8 +366,8 @@ class UI {
       const stepA = ev.shiftKey ? 5 : 1;
       const stepP = ev.shiftKey ? 5 : 2;
       switch (ev.key) {
-        case 'ArrowLeft': g.aimTo(p.id, p.angle - stepA, p.power); ev.preventDefault(); break;
-        case 'ArrowRight': g.aimTo(p.id, p.angle + stepA, p.power); ev.preventDefault(); break;
+        case 'ArrowLeft': g.aimTo(p.id, p.angle + stepA, p.power); ev.preventDefault(); break;
+        case 'ArrowRight': g.aimTo(p.id, p.angle - stepA, p.power); ev.preventDefault(); break;
         case 'ArrowUp': g.aimTo(p.id, p.angle, p.power + stepP); ev.preventDefault(); break;
         case 'ArrowDown': g.aimTo(p.id, p.angle, p.power - stepP); ev.preventDefault(); break;
         case 'a': case 'A': case ',': g.moveTank(-1); break;
@@ -380,11 +446,11 @@ class UI {
     this.el.shopMoney.textContent = '$' + p.money;
     const wrap = this.el.shopItems;
     wrap.innerHTML = '';
-    function card(defHtml, canBuy, onBuy) {
+    function card(defHtml, canBuy, wid, free) {
       const d = document.createElement('div');
-      d.className = 'shopCard' + (canBuy ? '' : ' off');
+      d.className = 'shopCard' + (free ? ' free' : canBuy ? '' : ' off');
+      if (!free) d.dataset.wid = wid;   // the delegated wrapper listener handles clicks
       d.innerHTML = defHtml;
-      if (canBuy) d.addEventListener('click', onBuy);
       wrap.appendChild(d);
     }
     for (const w of SE.shopWeapons()) {
@@ -395,7 +461,7 @@ class UI {
         '<div class="sFoot"><span>' + (w.free ? 'free · owned ∞' : w.count + ' × · owned ' + owned) +
         '</span><span class="sPrice">$' + w.price + '</span></div>',
         !w.free && p.money >= w.price,
-        () => { if (g.buy(p.id, w.id)) this._renderShop(); }
+        w.id, !!w.free
       );
     }
     for (const it of SE.ITEMS) {
@@ -405,7 +471,7 @@ class UI {
         '<div class="sDesc">' + this._esc(it.desc) + '</div>' +
         '<div class="sFoot"><span>owned ' + owned + '</span><span class="sPrice">$' + it.price + '</span></div>',
         p.money >= it.price,
-        () => { if (g.buy(p.id, it.id)) this._renderShop(); }
+        it.id, false
       );
     }
     this.el.shopDone.textContent = 'Done — pass the device on';

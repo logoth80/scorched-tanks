@@ -12,8 +12,10 @@
  * TURN RESOLUTION ORDER (strict, per the design):
  *   1. the shot resolves (every projectile finishes; blast circles are
  *      shown GROWING from each impact — no damage yet)
- *   2. once all circles finish growing: damage to players + craters
- *   3. the ground falls (settling runs to completion)
+ *   2. once all circles finish growing: damage to players (a tank FULLY
+ *      inside the circle takes the weapon's FULL hit points; a tank
+ *      shielded this turn takes none) + the circle's ground is destroyed
+ *   3. the ground falls (settling runs to completion — visibly, slowly)
  *   4. tanks fall if their ground went, then fall damage is applied
  *   ... only then does the next turn (or the next battle) begin.
  * ===================================================================== */
@@ -68,6 +70,7 @@ class Game {
     this.shopQueue = [];
     this.aiTimer = 0;
     this.betweenTimer = 0;
+    this.battleEnded = false;
     this.winner = null;
     this._handlers = {};
   }
@@ -98,6 +101,7 @@ class Game {
     this.battle++;
     // brand-new battlefield every battle
     this.terrain.generate(this.rand);
+    this.terrain.clearFire();
     this.round = 0;
     this.wind = 0;
     this.projectiles = [];
@@ -106,10 +110,12 @@ class Game {
     this.pendingAdds = [];
     this.settling = false;
     this.resPhase = null;
+    this.battleEnded = false;
+    this.battleDeathSeq = 0;              // kill ORDER this battle (for outlast pay)
     for (const p of this.players) {
       p.alive = true; p.hp = CFG.HP; p.fuel = CFG.FUEL_TOTAL;
       p.x = 0; p.y = 0; p.vy = 0; p.falling = false; p.paraActive = false;
-      p.shield = false;
+      p.shield = false; p.deathRank = 0; p._fireAcc = 0;
       p.needsAim = true;                 // fresh battlefield: aim defaults again,
       p.lastShot = null; p.lastImpact = null;  // but bought ammo + selection stay
     }
@@ -119,37 +125,62 @@ class Game {
   }
 
   placeTanks() {
+    // Slot placement: each tank lives in its own 1/n slice of the map with
+    // bounded jitter, so NO TWO TANKS can ever spawn touching each other,
+    // whatever the RNG does. Min separation = W/n − 2·jitter (≥ 90 px even
+    // for 8 players — tanks are 26 px wide).
     const n = this.players.length;
+    const step = CFG.W / n;
+    const jit = Math.min(60, (step - 90) / 2);
     for (let i = 0; i < n; i++) {
       const p = this.players[i];
+      const center = step * (i + 0.5);
+      const w = Math.max(4, Math.floor(jit) - 3);   // random centre stays inside the jitter budget
       let placed = false;
-      for (let att = 0; att < 500 && !placed; att++) {
-        const x = Math.round(60 + this.rand() * (CFG.W - 120));
-        let ok = true;
-        for (let j = 0; j < i; j++) {
-          if (Math.abs(this.players[j].x - x) < 150) { ok = false; break; }
+      const want = center + (this.rand() * 2 - 1) * w;
+      // search only ±3 px around the wanted spot — total drift from the slot
+      // centre never exceeds jit, so pair separation stays ≥ 90 px by design
+      const scan = (tol) => {
+        for (let off = 0; off <= 3; off++) {
+          for (const sgn of (off === 0 ? [1] : [1, -1])) {
+            const x = U.clamp(Math.round(want + sgn * off), 20, CFG.W - 20);
+            const gy = this.terrain.top(x);
+            if (Math.abs(this.terrain.top(x - 9) - gy) > tol ||
+                Math.abs(this.terrain.top(x + 9) - gy) > tol) continue;
+            p.x = x; p.y = gy; placed = true;
+            return;
+          }
         }
-        if (!ok) continue;
-        const gy = this.terrain.top(x);
-        if (Math.abs(this.terrain.top(x - 9) - gy) > 3 ||
-            Math.abs(this.terrain.top(x + 9) - gy) > 3) continue;
-        p.x = x; p.y = gy; placed = true;
-      }
-      if (!placed) {
-        p.x = Math.round((i + 1) * CFG.W / (n + 1));
+      };
+      scan(3);
+      if (!placed) scan(8);          // second tier: accept a mild slope; tanks
+      if (!placed) scan(20);         // settle to stable ground on their first physics tick
+      if (!placed) {                 // last resort: slot centre (still guaranteed apart)
+        p.x = U.clamp(Math.round(center), 20, CFG.W - 20);
         p.y = this.terrain.top(p.x);
       }
     }
   }
 
   _endOfBattle() {
+    if (this.battleEnded) return;          // idempotent — fire/storm can kill too
+    this.battleEnded = true;
     const alive = this.players.filter(function (p) { return p.alive; });
     const winnerId = alive.length === 1 ? alive[0].id : null;
-    if (winnerId != null) {
-      this.battleWins[winnerId]++;
-      this.addMoney(this.players[winnerId], CFG.WIN_PAY, 'win');
+    if (winnerId != null) this.battleWins[winnerId]++;
+    // every tank is paid for surviving the battle: a base amount, plus a
+    // bonus for EACH enemy it outlasted (whoever died before it did).
+    // Tanks alive at the end outlast everyone who died; co-survivors tie.
+    for (const p of this.players) {
+      const rank = p.alive ? this.battleDeathSeq + 1 : (p.deathRank || 0);
+      let outlasted = 0;
+      for (const q of this.players) {
+        if (q.id === p.id) continue;
+        const qr = q.alive ? this.battleDeathSeq + 1 : (q.deathRank || 0);
+        if (qr < rank) outlasted++;
+      }
+      this.addMoney(p, CFG.BATTLE_BASE_PAY + CFG.OUTLAST_PAY * outlasted, 'battle');
     }
-    for (const p of alive) this.addMoney(p, CFG.SURVIVE_PAY, 'survive');
     this.emit('battleEnd', { battle: this.battle, winnerId: winnerId });
 
     if (this.battle >= this.totalBattles) { this._finishMatch(); return; }
@@ -281,7 +312,7 @@ class Game {
     const p = this.players[pid];
     if (!p || this.currentId !== pid) return;
     p.angle = U.clamp(angle, 0, 180);
-    p.power = U.clamp(power, 1, 100);
+    p.power = U.clamp(power, 1, CFG.POWER_MAX || 100);
     this.emit('aim', { playerId: pid, angle: p.angle, power: p.power });
   }
   selectWeapon(pid, weaponId) {
@@ -368,9 +399,11 @@ class Game {
       case 'aim':
         // ground is stable here; only a tank that drove off an edge may fall
         this._updateTanks();
+        if (this.state === 'aim') this._tickFire();   // liquid fire burns in real time
         break;
 
       case 'flight':
+        this._tickFire();
         this._stepBlastQueue();
         this._tickBlasts(1);          // circles grow, but apply NOTHING yet
         this._stepProjectiles();
@@ -378,11 +411,38 @@ class Game {
         break;
 
       case 'resolve':
+        this._tickFire();
         this._resolveTick();
         break;
 
       default: break;   // idle / over
     }
+  }
+
+  /* ---------- liquid fire hazard (napalm): flows, burns, hurts ---------- */
+  _tickFire() {
+    const T = this.terrain;
+    if (!T.hasFire()) return;
+    T.stepFire();
+    const hw = CFG.TANK_W / 2;
+    for (const t of this.players) {
+      if (!t.alive) { t._fireAcc = 0; continue; }
+      let best = 0, bestX = -1;
+      for (let x = Math.max(0, (t.x - hw) | 0); x <= Math.min(CFG.W - 1, (t.x + hw) | 0); x++) {
+        if (T.fire[x] > best) { best = T.fire[x]; bestX = x; }
+      }
+      if (best < 0.6) { t._fireAcc = 0; continue; }
+      const owner = bestX >= 0 && T.fireOwner[bestX] >= 0 ? T.fireOwner[bestX] : null;
+      if (best >= CFG.TANK_H) {
+        /* FULLY SUBMERGED in the burning fluid → dies, shield permitting */
+        this.damage(t, 9999, owner, 'fire');
+        t._fireAcc = 0;
+      } else {
+        t._fireAcc = (t._fireAcc || 0) + 1;
+        if (t._fireAcc % CFG.FIRE_TICK === 0) this.damage(t, CFG.FIRE_DOT, owner, 'fire');
+      }
+    }
+    if (this.aliveCount() <= 1) this._endOfBattle();   // fire can end the battle
   }
 
   /* ---------- turn resolution state machine ---------- */
@@ -458,7 +518,7 @@ class Game {
     this.emit('fx', { kind: 'impact', x: b.x, y: b.y, r: b.radius });
   }
 
-  _settleStart() { this.settling = true; this.settleBudget = 500; }
+  _settleStart() { this.settling = true; this.settleBudget = 4000; }
 
   /* ---------- tanks fall when the ground under them goes ---------- */
   _updateTanks() {
@@ -527,6 +587,9 @@ class Game {
         // ground BUILDING is also deferred to the resolution phase, so the
         // strict order (shot → terrain changes → settling → tanks) holds
         this.pendingAdds.push({ x: e.x, y: e.y, r: e.r, raise: e.raise });
+      } else if (e.type === 'fire') {
+        // liquid fire pours immediately — it is a flowing hazard, not a dig
+        this.terrain.addFire(e.x, e.radius, e.depth, e.life, e.owner);
       } else if (e.type === 'direct') {
         this.emit('fx', { kind: 'direct', x: e.tank.x, y: e.tank.y - CFG.TANK_H / 2 });
         if (e.owner != null && this.players[e.owner]) {
@@ -545,11 +608,25 @@ class Game {
   /* applied only when the telegraph circle has finished growing */
   applyBlast(b) {
     this.emit('fx', { kind: 'explosion', x: b.x, y: b.y, r: b.radius, burn: b.burn });
+    const hw = CFG.TANK_W / 2;
     for (const t of this.players) {
       if (!t.alive) continue;
-      const d = Math.hypot(b.x - t.x, b.y - (t.y - CFG.TANK_H / 2));
-      if (d < b.radius) {
-        const f = 1 - d / b.radius;
+      const top = t.y - CFG.TANK_H;
+      /* FULLY INSIDE THE CIRCLE → FULL DAMAGE. A whole tank swallowed by the
+         blast eats the weapon's full hit points (Basic = 100 = dead), unless
+         it is shielded this turn. Measured to the tank's FARTHEST corner. */
+      const dxFar = Math.max(Math.abs(t.x - hw - b.x), Math.abs(t.x + hw - b.x));
+      const dyFar = Math.max(Math.abs(top - b.y), Math.abs(t.y - b.y));
+      if (Math.hypot(dxFar, dyFar) <= b.radius) {
+        this.damage(t, b.damage, b.owner != null ? b.owner : null, 'blast');
+        continue;
+      }
+      /* partially inside → scaled by how deep it sits in the circle */
+      const cx = U.clamp(b.x, t.x - hw, t.x + hw);
+      const cy = U.clamp(b.y, top, t.y);
+      const dNear = Math.hypot(cx - b.x, cy - b.y);
+      if (dNear < b.radius) {
+        const f = 1 - dNear / b.radius;
         const dmg = Math.max(1, Math.round(b.damage * f));
         this.damage(t, dmg, b.owner != null ? b.owner : null, 'blast');
       }
@@ -573,11 +650,12 @@ class Game {
     this.emit('damage', { playerId: t.id, amount: amount, cause: cause, srcId: owner });
     if (t.hp <= 0) {
       t.alive = false;
+      t.deathRank = ++this.battleDeathSeq;   // when it died decides its outlast pay
       if (owner != null && owner !== t.id && this.players[owner]) {
         this.players[owner].kills++;
         this.addMoney(this.players[owner], CFG.KILL_PAY, 'kill');
       }
-      this.emit('kill', { victimId: t.id, killerId: owner != null ? owner : null });
+      this.emit('kill', { victimId: t.id, killerId: owner != null ? owner : null, cause: cause });
     }
   }
 

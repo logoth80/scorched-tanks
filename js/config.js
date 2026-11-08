@@ -3,8 +3,8 @@
  * Everything you might want to tweak lives in this file.
  * Adding a new ammunition type = copy one entry in SE.WEAPONS, change
  * the numbers, and (if needed) reuse one of the existing behaviors
- * ('explode', 'cluster', 'roll', 'multiblast', 'addground') implemented
- * in js/weapons.js. It shows up in the shop automatically.
+ * ('explode', 'thud', 'cluster', 'roll', 'multiblast', 'addground', 'fire')
+ * implemented in js/weapons.js. It shows up in the shop automatically.
  * ===================================================================== */
 (function (root) {
 'use strict';
@@ -47,14 +47,33 @@ SE.CONFIG = {
 
   /* Physics — all values in pixels / frames at 60 Hz */
   GRAVITY: 0.15,
-  MAX_SPEED: 11.6,          // projectile speed at power 100
-  SPEED_CLAMP: 16,          // hard clamp on total projectile speed
+  MAX_SPEED: 11.6,          // projectile speed at power 100 (power 200 = 2×)
+  POWER_MAX: 200,           // upper bound of the power dial (100 = normal range)
+  SPEED_CLAMP: 30,          // hard clamp on total projectile speed
   WIND_MAX: 12,             // wind is re-rolled every turn, in [-max, +max]
   WIND_ACCEL: 0.0026,       // horizontal acceleration per wind unit
 
   /* Terrain stability — after any explosion, soil above this slope slumps */
   REPOSE: 3,                // max stable height step between neighbour columns
-  SLUMP_MAX: 5,             // max px transferred per column pair per pass
+  SLUMP_MAX: 3,             // max px transferred per column pair per pass (lower = slower avalanche)
+  FALL_RATE: 3,             // px a soil pixel drops per settling pass (lower = slower collapse)
+
+  /* Open borders: terrain generation fades mountains down to low ground in
+     the first/last EDGE_OPEN columns — shots past the screen edge fly off
+     into open sky instead of hitting a wall at the border. */
+  EDGE_OPEN: 70,
+
+  /* Liquid fire (napalm) — a burning fluid that flows down to level,
+     clings to the ground and burns for `life` frames. A tank with fire
+     touching it is hurt every FIRE_TICK frames; FULLY submerged
+     (depth ≥ TANK_H) it dies. All sizes in px per ground column. */
+  FIRE_MAX: 26,             // max depth of burning fluid per column
+  FIRE_FLOW: 1.5,           // max px transferred between neighbours per pass
+  FIRE_MIN_LEVEL: 0.8,      // below this surface difference fire stops flowing
+  FIRE_KEEP: 0.997,         // slow burn-down while still alive
+  FIRE_BURNOUT: 0.8,        // fast shrink once its time is up
+  FIRE_DOT: 6,              // damage per tick while merely touched by fire
+  FIRE_TICK: 12,            // frames between fire damage ticks
 
   /* Tanks — small simple sprites */
   TANK_W: 20,
@@ -86,9 +105,9 @@ SE.CONFIG = {
 
   /* Economy — money carries across battles */
   START_MONEY: 1000,
-  WIN_PAY: 400,               // paid to the winner at the end of a battle
-  SURVIVE_PAY: 200,           // paid to every tank still standing at battle end
-  KILL_PAY: 500,              // paid instantly to the killer
+  BATTLE_BASE_PAY: 700,     // every tank gets this after a battle ends…
+  OUTLAST_PAY: 100,         // …plus this for every enemy it outlasted (died after it)
+  KILL_PAY: 500,            // paid instantly to the killer
 
   /* Blast telegraph: the damage circle grows visibly from the impact
      point for this many frames BEFORE ground + players are damaged. */
@@ -132,10 +151,12 @@ SE.TANK_VARIANTS = ['compact', 'stalker', 'hauler'];
  * AMMUNITION TABLE — tune freely, add more.
  *  price / count : shop pack (buying gives `count` shots for `price` $)
  *  hidden:true   : internal child projectile, not sold in the shop
- *  behavior      : 'explode' | 'thud' | 'cluster' | 'roll' | 'multiblast' | 'addground'
+ *  behavior      : 'explode' | 'thud' | 'cluster' | 'roll' | 'multiblast' | 'addground' | 'fire'
  *  explosion     : radius = damage circle, crater = crater radius multiplier
  *                  (crater sizes stay independent of radius — scale freely)
- *  launch        : per-weapon multipliers on shared ballistics
+ *  fire          : liquid-fire pour for behavior 'fire' (radius/depth px, life frames)
+ *  launch        : per-weapon multipliers on shared ballistics; optional
+ *                  `terminal` caps how fast the projectile can fall (px/frame)
  * ===================================================================== */
 SE.WEAPONS = [
   {
@@ -144,13 +165,12 @@ SE.WEAPONS = [
     color: '#ffe27a', trail: 'rgba(255,226,122,0.55)', size: 2.4,
     launch: { speedScale: 1.0, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'explode',
-    // radius = DAMAGE circle (telegraphed to players); crater stays as before —
-    // scaling radius here does NOT grow the hole
-    explosion: { radius: 63, damage: 100, crater: 0.53 },
+    // radius = DAMAGE circle; crater 1.0 = the circle destroys ALL ground it covers
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
   },
   {
     id: 'cluster', name: 'Cluster Bomb', price: 600, count: 3,
-    desc: 'Splits at the top of its arc, scattering bomblets over a WIDE area. Bomblets never explode — only direct hits count.',
+    desc: 'Splits at the top of its arc, scattering bomblets over a WIDE area. They drift down slowly and pop in small blasts.',
     color: '#ffb347', trail: 'rgba(255,179,71,0.5)', size: 3,
     launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.1, drag: 0 },
     behavior: 'cluster',
@@ -161,10 +181,13 @@ SE.WEAPONS = [
   },
   {
     id: 'clusterlet', name: 'Bomblet', hidden: true,
-    desc: 'Bomblet from the Cluster Bomb. Thuds into the ground — it never detonates.',
+    desc: 'Bomblet from the Cluster Bomb. Drifts down slowly, then pops in a small blast.',
     color: '#ffd27a', trail: 'rgba(255,210,122,0.4)', size: 1.8,
-    launch: { speedScale: 1, gravityScale: 1.05, windScale: 1.0, drag: 0 },
-    behavior: 'thud',
+    /* low terminal velocity (terminal) + drag = it floats down like real
+       cluster bomblets, letting wind scatter it over a wide pattern */
+    launch: { speedScale: 1, gravityScale: 0.85, windScale: 1.3, drag: 0.01, terminal: 2.4 },
+    behavior: 'explode',
+    explosion: { radius: 26, damage: 45, crater: 1.0 },
   },
   {
     id: 'roller', name: 'Roller', price: 300, count: 5,
@@ -175,17 +198,16 @@ SE.WEAPONS = [
     roll: {
       slopeAccel: 0.16, friction: 0.993, maxSpeed: 7, stopSpeed: 0.3,
       maxTime: 900,
-      explode: { radius: 42, damage: 85, crater: 0.43 },
+      explode: { radius: 42, damage: 85, crater: 1.0 },
     },
   },
   {
     id: 'napalm', name: 'Napalm', price: 400, count: 2,
-    desc: 'Enormous fire damage area, wide shallow crater. Great for flattening slopes.',
+    desc: 'No blast — pours LIQUID FIRE that flows downhill, fills low ground and burns for 5 seconds. A tank submerged in it dies.',
     color: '#ff7a3c', trail: 'rgba(255,122,60,0.55)', size: 2.8,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.2, drag: 0.0015 },
-    behavior: 'explode',
-    // craterY squashes the crater vertically: wide burn scar, shallow dig
-    explosion: { radius: 132, damage: 95, crater: 0.30, craterY: 0.55, burn: 240 },
+    behavior: 'fire',
+    fire: { radius: 78, depth: 15, life: 300 },   // 300 frames = 5 seconds at 60 Hz
   },
   {
     id: 'big', name: 'Big Bomb', price: 600, count: 1,
@@ -194,9 +216,9 @@ SE.WEAPONS = [
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'multiblast',
     blasts: [
-      { dx: 0,   dy: 0,  delay: 0,  radius: 108, damage: 100, crater: 0.53 },
-      { dx: -46, dy: -8, delay: 9,  radius: 72,  damage: 80,  crater: 0.40 },
-      { dx: 44,  dy: -14, delay: 17, radius: 72, damage: 80,  crater: 0.40 },
+      { dx: 0,   dy: 0,  delay: 0,  radius: 108, damage: 100, crater: 1.0 },
+      { dx: -46, dy: -8, delay: 9,  radius: 72,  damage: 80,  crater: 1.0 },
+      { dx: 44,  dy: -14, delay: 17, radius: 72, damage: 80,  crater: 1.0 },
     ],
   },
   {

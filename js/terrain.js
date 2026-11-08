@@ -5,10 +5,12 @@
  * - dig() / add() modify single pixels; every change registers a dirty
  *   rect so the renderer only repaints what changed
  * - settleStep() runs the two "pixels fall down" rules until stable:
- *     1) ANY hole collapses: soil above a void drops to fill it, so a
- *        column is always a solid stack from the floor up
+ *     1) ANY hole collapses: each soil pixel above a void drops toward it —
+ *        at most FALL_RATE px per pass, so ground visibly FALLS instead of
+ *        teleporting; a column ends as a solid stack from the floor up
  *     2) over-steep slopes slump: the top slice of a too-high column
- *        slides onto its lower neighbour (angle of repose)
+ *        slides onto its lower neighbour (angle of repose), at most
+ *        SLUMP_MAX px per pass
  *   Mass is exactly conserved by settling; only dig/add change it.
  * ===================================================================== */
 (function (root) {
@@ -23,6 +25,11 @@ class Terrain {
     this.tops = new Int16Array(W);
     this.counts = new Int32Array(W);
     for (let x = 0; x < W; x++) this.tops[x] = H;
+    /* liquid fire (napalm): depth px per column + remaining life frames */
+    this.fire = new Float32Array(W);
+    this.fireTtl = new Int16Array(W);
+    this.fireOwner = new Int16Array(W).fill(-1);
+    this._fflip = 0;
     this.rects = [];
   }
 
@@ -45,10 +52,21 @@ class Terrain {
       const n = (h[x] - mn) / (mx - mn || 1);
       let gy = Math.round(H * (0.74 - n * 0.46));
       gy = U.clamp(gy, 90, H - 140);
+      /* OPEN BORDERS: mountains fade to low open ground at the screen edges,
+         so a shot that flies past the border flies off into sky — the border
+         never stops a missile. */
+      const EO = SE.CONFIG.EDGE_OPEN || 0;
+      const edgeDist = Math.min(x, W - 1 - x);
+      if (edgeDist < EO) {
+        const t = edgeDist / EO;
+        const s = t * t * (3 - 2 * t);
+        gy = Math.round(U.lerp(H - 140, gy, s));
+      }
       this.tops[x] = gy;
       this.counts[x] = H - gy;
       for (let y = gy; y < H; y++) this.data[y * W + x] = 1;
     }
+    this.clearFire();
     this.rects = [[0, 0, W, H]];
   }
 
@@ -66,7 +84,11 @@ class Terrain {
 
   /* ---------- queries ---------- */
   solid(x, y) {
-    if (x < 0 || x >= this.W || y >= this.H) return true;
+    /* the LEFT/RIGHT screen borders are OPEN SKY — nothing at the border
+       stops or explodes a missile; a shot past the edge simply flies away.
+       (y below the map stays solid: that is the ground you came from.) */
+    if (x < 0 || x >= this.W) return false;
+    if (y >= this.H) return true;
     if (y < 0) return false;
     /* MUST floor: Uint8Array with a fractional index yields undefined */
     return this.data[(y | 0) * this.W + (x | 0)] === 1;
@@ -150,29 +172,105 @@ class Terrain {
     this.addRect(cx - r, cy - r, 2 * r + 1, 2 * r + 1);
   }
 
+  /* ---------- liquid fire (napalm) — a burning FLUID on the ground -------
+     fire[x] = depth in px of burning fluid on top of ground column x.
+     It flows like a liquid (surfaces level out, so it runs down mountains
+     and fills pits/valleys), stays alive for fireTtl frames, then burns
+     itself away. It never digs or adds soil — the ground only changes from
+     ordinary blasts. ------------------------------------------------------ */
+  addFire(cx, r, depth, ttl, owner) {
+    cx |= 0; r |= 0;
+    if (r <= 0 || depth <= 0) return;
+    const G = SE.CONFIG;
+    const x0 = Math.max(0, cx - r), x1 = Math.min(this.W - 1, cx + r);
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx;
+      const w = Math.sqrt(Math.max(0, r * r - dx * dx)) / r;   // round pour pattern
+      this.fire[x] = Math.min(G.FIRE_MAX, this.fire[x] + depth * w);
+      if (this.fireTtl[x] < ttl) {
+        this.fireTtl[x] = ttl;
+        this.fireOwner[x] = owner != null ? owner : -1;
+      }
+    }
+  }
+
+  /* one flow+burn pass — call once per game frame while fire is present */
+  stepFire() {
+    const W = this.W, G = SE.CONFIG, fire = this.fire, ttl = this.fireTtl;
+    this._fflip ^= 1;
+    const xs = this._fflip ? 0 : W - 2, xe = this._fflip ? W - 2 : 0, st = this._fflip ? 1 : -1;
+    for (let x = xs; st > 0 ? x <= xe : x >= xe; x += st) {
+      const a = fire[x], b = fire[x + 1];
+      if (a <= 0 && b <= 0) continue;
+      /* fluid SURFACE height (smaller y = higher): ground top minus depth */
+      const diff = (this.tops[x + 1] - b) - (this.tops[x] - a);
+      if (Math.abs(diff) < G.FIRE_MIN_LEVEL) continue;
+      const amt = Math.min(Math.abs(diff) / 2, G.FIRE_FLOW, diff > 0 ? a : b);
+      if (amt <= 0) continue;
+      /* the burning STATE travels with the fluid: the receiver inherits the
+         donor's remaining life, so fire flowing down a hill still burns */
+      if (diff > 0) {
+        fire[x] = a - amt; fire[x + 1] = b + amt;
+        if (ttl[x] > ttl[x + 1]) { ttl[x + 1] = ttl[x]; this.fireOwner[x + 1] = this.fireOwner[x]; }
+      } else {
+        fire[x] = a + amt; fire[x + 1] = b - amt;
+        if (ttl[x + 1] > ttl[x]) { ttl[x] = ttl[x + 1]; this.fireOwner[x] = this.fireOwner[x + 1]; }
+      }
+      if (fire[x] < 0.02) fire[x] = 0;
+      if (fire[x + 1] < 0.02) fire[x + 1] = 0;
+    }
+    for (let x = 0; x < W; x++) {
+      if (ttl[x] > 0) { ttl[x]--; fire[x] *= G.FIRE_KEEP; }
+      else if (fire[x] > 0) {
+        fire[x] *= G.FIRE_BURNOUT;
+        if (fire[x] < 0.05) { fire[x] = 0; this.fireOwner[x] = -1; }
+      }
+    }
+  }
+
+  hasFire() {
+    const f = this.fire;
+    for (let x = 0, n = f.length; x < n; x++) if (f[x] > 0) return true;
+    return false;
+  }
+  clearFire() {
+    this.fire.fill(0);
+    this.fireTtl.fill(0);
+    this.fireOwner.fill(-1);
+  }
+
   /* ---------- "land pixels fall down" — one relaxation pass ---------- */
   _flip = 0;
   settleStep() {
     const W = this.W, H = this.H, G = SE.CONFIG;
     let moved = 0;
 
-    /* rule 1: any hole collapses — soil in the column falls into the void */
+    /* rule 1: soil FALLS into holes — each pixel drops at most FALL_RATE px
+       per pass, so a collapse reads as ground falling, not teleporting.
+       Bottom→top scan: every pixel moves at most once per pass. */
+    const FR = Math.max(1, G.FALL_RATE | 0);
     for (let x = 0; x < W; x++) {
       if (this.counts[x] === H - this.tops[x]) continue; // already a clean stack
-      const oldTop = this.tops[x];
-      let w = H - 1;
-      for (let y = H - 1; y >= 0; y--) {
+      let fell = 0;
+      for (let y = H - 2; y >= 0; y--) {
         const idx = y * W + x;
-        if (this.data[idx]) {
-          if (y !== w) { this.data[w * W + x] = 1; this.data[idx] = 0; }
-          w--;
-        }
+        if (!this.data[idx]) continue;
+        if (this.data[idx + W]) continue;                // resting on soil
+        let d = 1;                                       // fall through clear air
+        while (d < FR && y + d + 1 < H && this.data[idx + (d + 1) * W] === 0) d++;
+        this.data[idx] = 0;
+        this.data[idx + d * W] = 1;
+        fell++;
       }
-      const newTop = H - this.counts[x];
-      this.tops[x] = newTop;
-      const y0 = Math.min(oldTop, newTop);
-      this.addRect(x, y0, 1, H - y0);
-      moved++;
+      if (fell) {
+        this.refreshTop(x);                              // counts unchanged: pure fall
+        this.addRect(x, 0, 1, H);
+        moved++;
+      } else if (this.counts[x] !== H - this.tops[x]) {
+        /* self-heal: tops can go stale after slumps while the stack is
+           actually fine — without this, settling deadlocks on a phantom top */
+        this.refreshTop(x);
+      }
     }
 
     /* rule 2: over-steep neighbours slump toward each other */

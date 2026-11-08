@@ -109,8 +109,9 @@ class Game {
     for (const p of this.players) {
       p.alive = true; p.hp = CFG.HP; p.fuel = CFG.FUEL_TOTAL;
       p.x = 0; p.y = 0; p.vy = 0; p.falling = false; p.paraActive = false;
-      p.shield = false; p.selected = 'basic';
-      p.angle = 60; p.power = 50;
+      p.shield = false;
+      p.needsAim = true;                 // fresh battlefield: aim defaults again,
+      p.lastShot = null; p.lastImpact = null;  // but bought ammo + selection stay
     }
     this.placeTanks();
     this.emit('battleStart', { battle: this.battle, total: this.totalBattles, first: !!first });
@@ -240,15 +241,20 @@ class Game {
     this._setState('aim');
     this.wind = Math.round((this.rand() * 2 - 1) * CFG.WIND_MAX * 10) / 10;
 
-    // default aim toward the nearest enemy
-    let nearest = null, nd = Infinity;
-    for (const q of this.players) {
-      if (q.id === p.id || !q.alive) continue;
-      const d = Math.abs(q.x - p.x);
-      if (d < nd) { nd = d; nearest = q; }
+    // First turn on this battlefield gets a sensible default aim.
+    // After that the player's own angle/power are KEPT for the next turn —
+    // fine corrections are how artillery is actually played.
+    if (p.needsAim) {
+      let nearest = null, nd = Infinity;
+      for (const q of this.players) {
+        if (q.id === p.id || !q.alive) continue;
+        const d = Math.abs(q.x - p.x);
+        if (d < nd) { nd = d; nearest = q; }
+      }
+      p.angle = nearest && nearest.x < p.x ? 125 : 55;
+      p.power = 55;
+      p.needsAim = false;
     }
-    p.angle = nearest && nearest.x < p.x ? 125 : 55;
-    p.power = 55;
     if (!(p.ammo[p.selected] > 0)) p.selected = 'basic';
 
     this.emit('wind', { wind: this.wind });
@@ -301,6 +307,8 @@ class Game {
     const py = (p.y - CFG.TANK_H + 3) - Math.sin(p.angle * DEG) * CFG.BARREL_LEN;
     this.projectiles.push(SE.Weapons.create(weaponId, px, py, p.angle, speed, p.id));
     p.shots++;
+    // remember what this shot WAS — smarter AI and shot-mirroring depend on it
+    p.lastShot = { angle: p.angle, power: p.power, weaponId: weaponId };
     this._setState('flight');
     this.emit('fire', { playerId: p.id, weaponId: weaponId, x: px, y: py, angle: p.angle });
     this.emit('fx', { kind: 'muzzle', x: px, y: py, angle: p.angle });
@@ -444,6 +452,9 @@ class Game {
       x: b.x, y: b.y, owner: b.owner, radius: b.radius, damage: b.damage,
       crater: b.crater, craterY: b.craterY, burn: b.burn || 0, t: 0,
     });
+    if (b.owner != null && this.players[b.owner]) {
+      this.players[b.owner].lastImpact = { x: b.x, y: b.y };   // feedback for next shot
+    }
     this.emit('fx', { kind: 'impact', x: b.x, y: b.y, r: b.radius });
   }
 
@@ -518,8 +529,14 @@ class Game {
         this.pendingAdds.push({ x: e.x, y: e.y, r: e.r, raise: e.raise });
       } else if (e.type === 'direct') {
         this.emit('fx', { kind: 'direct', x: e.tank.x, y: e.tank.y - CFG.TANK_H / 2 });
+        if (e.owner != null && this.players[e.owner]) {
+          this.players[e.owner].lastImpact = { x: e.tank.x, y: e.tank.y };
+        }
         this.damage(e.tank, CFG.DIRECT_DAMAGE, e.owner, 'direct');
       } else if (e.type === 'fx') {
+        if (e.kind === 'spark' && e.owner != null && this.players[e.owner]) {
+          this.players[e.owner].lastImpact = { x: e.x, y: e.y };
+        }
         this.emit('fx', e);
       }
     }

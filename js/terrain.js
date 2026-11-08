@@ -68,7 +68,8 @@ class Terrain {
   solid(x, y) {
     if (x < 0 || x >= this.W || y >= this.H) return true;
     if (y < 0) return false;
-    return this.data[y * this.W + x] === 1;
+    /* MUST floor: Uint8Array with a fractional index yields undefined */
+    return this.data[(y | 0) * this.W + (x | 0)] === 1;
   }
   top(x) {
     x = U.clamp(x | 0, 0, this.W - 1);

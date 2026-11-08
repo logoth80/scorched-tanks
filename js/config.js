@@ -49,7 +49,7 @@ SE.CONFIG = {
   GRAVITY: 0.15,
   MAX_SPEED: 11.6,          // projectile speed at power 100
   SPEED_CLAMP: 16,          // hard clamp on total projectile speed
-  WIND_MAX: 4,              // wind is re-rolled every turn, in [-max, +max]
+  WIND_MAX: 12,             // wind is re-rolled every turn, in [-max, +max]
   WIND_ACCEL: 0.0026,       // horizontal acceleration per wind unit
 
   /* Terrain stability — after any explosion, soil above this slope slumps */
@@ -92,7 +92,15 @@ SE.CONFIG = {
 
   /* Blast telegraph: the damage circle grows visibly from the impact
      point for this many frames BEFORE ground + players are damaged. */
-  BLAST_TELEGRAPH: 45,
+  BLAST_TELEGRAPH: 85,      // damage circle grows ~1.4 s before detonation
+
+  /* AI character — the CPU genuinely remembers+corrects its shots, but aims
+     like a person, not a machine: imperfect wind reading and a jitter that
+     makes direct hits earned, not guaranteed. Tune freely. */
+  AI_JITTER_ANGLE: 3.0,     // degrees of sloppiness on the final pick
+  AI_JITTER_POWER: 5,       // power units of sloppiness
+  AI_WIND_BLUNDER: 1.6,     // how wrong the AI "reads" the wind (± units)
+  AI_TOPK: 3,               // picks randomly among its best K plans
 
   /* Storm — anti-stalemate: from this round on, every surviving tank is
      harmed a little more each round (a shield blocks it). Tune freely. */
@@ -124,8 +132,9 @@ SE.TANK_VARIANTS = ['compact', 'stalker', 'hauler'];
  * AMMUNITION TABLE — tune freely, add more.
  *  price / count : shop pack (buying gives `count` shots for `price` $)
  *  hidden:true   : internal child projectile, not sold in the shop
- *  behavior      : 'explode' | 'cluster' | 'roll' | 'multiblast' | 'addground'
+ *  behavior      : 'explode' | 'thud' | 'cluster' | 'roll' | 'multiblast' | 'addground'
  *  explosion     : radius = damage circle, crater = crater radius multiplier
+ *                  (crater sizes stay independent of radius — scale freely)
  *  launch        : per-weapon multipliers on shared ballistics
  * ===================================================================== */
 SE.WEAPONS = [
@@ -135,25 +144,27 @@ SE.WEAPONS = [
     color: '#ffe27a', trail: 'rgba(255,226,122,0.55)', size: 2.4,
     launch: { speedScale: 1.0, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'explode',
-    explosion: { radius: 42, damage: 100, crater: 0.8 },
+    // radius = DAMAGE circle (telegraphed to players); crater stays as before —
+    // scaling radius here does NOT grow the hole
+    explosion: { radius: 63, damage: 100, crater: 0.53 },
   },
   {
     id: 'cluster', name: 'Cluster Bomb', price: 600, count: 3,
-    desc: 'Splits at the top of its arc into 4 bomblets that rain down.',
+    desc: 'Splits at the top of its arc, scattering bomblets over a WIDE area. Bomblets never explode — only direct hits count.',
     color: '#ffb347', trail: 'rgba(255,179,71,0.5)', size: 3,
     launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.1, drag: 0 },
     behavior: 'cluster',
     split: {
-      n: 4, minTime: 40, maxTime: 320, child: 'clusterlet', inherit: 0.5,
-      spread: { minAngle: 35, maxAngle: 105, speed: 1.5, jitter: 0.8 },
+      n: 4, minTime: 40, maxTime: 320, child: 'clusterlet', inherit: 0.55,
+      spread: { minAngle: 18, maxAngle: 162, speed: 3.2, jitter: 1.5 },
     },
   },
   {
     id: 'clusterlet', name: 'Bomblet', hidden: true,
+    desc: 'Bomblet from the Cluster Bomb. Thuds into the ground — it never detonates.',
     color: '#ffd27a', trail: 'rgba(255,210,122,0.4)', size: 1.8,
     launch: { speedScale: 1, gravityScale: 1.05, windScale: 1.0, drag: 0 },
-    behavior: 'explode',
-    explosion: { radius: 24, damage: 70, crater: 0.6 },
+    behavior: 'thud',
   },
   {
     id: 'roller', name: 'Roller', price: 300, count: 5,
@@ -164,7 +175,7 @@ SE.WEAPONS = [
     roll: {
       slopeAccel: 0.16, friction: 0.993, maxSpeed: 7, stopSpeed: 0.3,
       maxTime: 900,
-      explode: { radius: 28, damage: 85, crater: 0.65 },
+      explode: { radius: 42, damage: 85, crater: 0.43 },
     },
   },
   {
@@ -174,7 +185,7 @@ SE.WEAPONS = [
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.2, drag: 0.0015 },
     behavior: 'explode',
     // craterY squashes the crater vertically: wide burn scar, shallow dig
-    explosion: { radius: 88, damage: 95, crater: 0.45, craterY: 0.55, burn: 240 },
+    explosion: { radius: 132, damage: 95, crater: 0.30, craterY: 0.55, burn: 240 },
   },
   {
     id: 'big', name: 'Big Bomb', price: 600, count: 1,
@@ -183,9 +194,9 @@ SE.WEAPONS = [
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'multiblast',
     blasts: [
-      { dx: 0,   dy: 0,  delay: 0,  radius: 72, damage: 100, crater: 0.8 },
-      { dx: -46, dy: -8, delay: 9,  radius: 48, damage: 80,  crater: 0.6 },
-      { dx: 44,  dy: -14, delay: 17, radius: 48, damage: 80, crater: 0.6 },
+      { dx: 0,   dy: 0,  delay: 0,  radius: 108, damage: 100, crater: 0.53 },
+      { dx: -46, dy: -8, delay: 9,  radius: 72,  damage: 80,  crater: 0.40 },
+      { dx: 44,  dy: -14, delay: 17, radius: 72, damage: 80,  crater: 0.40 },
     ],
   },
   {
@@ -195,7 +206,7 @@ SE.WEAPONS = [
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'addground',
     add: { radius: 40, raise: 6 },
-    explosion: { radius: 26, damage: 25, crater: 0 },
+    explosion: { radius: 39, damage: 25, crater: 0 },
   },
 ];
 

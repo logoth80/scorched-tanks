@@ -91,22 +91,31 @@ class Renderer {
     switch (e.kind) {
       case 'explosion': {
         // the damage circle was already telegraphed while it grew; this is the
-        // pop at detonation — keep it at crater size, not the full radius
-        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 6, r1: e.r * 0.55, ttl: 12, t: 0 });
-        this.particles.push({ k: 'flash', x: e.x, y: e.y, r: e.r * 0.5, ttl: 7, t: 0 });
+        // pop at detonation — deliberately SLOW so it reads as one event:
+        // flash → crater ring → a last shockwave to the telegraph edge → debris
+        this.particles.push({ k: 'flash', x: e.x, y: e.y, r: e.r * 0.5, ttl: 16, t: 0 });
+        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 6, r1: e.r * 0.55, ttl: 26, t: 0 });
+        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: e.r * 0.5, r1: e.r, ttl: 34, t: 0 });
         const n = Math.min(40, Math.round(e.r * 0.7));
         for (let i = 0; i < n; i++) {
           const a = Math.random() * Math.PI - Math.PI; // upward-ish hemisphere
-          const sp = 1 + Math.random() * (e.r / 18);
+          const sp = 1 + Math.random() * (e.r / 26);
           this.particles.push({
             k: 'dirt', x: e.x, y: e.y, vx: Math.cos(a) * sp * (Math.random() < 0.5 ? -1 : 1),
-            vy: Math.sin(a) * sp - 1, ttl: 28 + Math.random() * 22, t: 0,
+            vy: Math.sin(a) * sp - 1, ttl: 44 + Math.random() * 36, t: 0,
           });
         }
         if (e.burn) this.burns.push({ x: e.x, y: e.y, r: e.r * 0.8, ttl: e.burn, t: 0 });
         if (e.r > 55) this.shake = Math.max(this.shake, 10);
         break;
       }
+      case 'spark':   // bomblet hit: a small spark, no explosion at all
+        this.particles.push({ k: 'spark', x: e.x, y: e.y, ttl: 14, t: 0 });
+        for (let i = 0; i < 4; i++) {
+          this.particles.push({ k: 'dust', x: e.x, y: e.y,
+            vx: (Math.random() - 0.5) * 1.5, vy: -Math.random() * 0.8, ttl: 16 + Math.random() * 8, t: 0 });
+        }
+        break;
       case 'burst':
         this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 3, r1: 26, ttl: 10, t: 0 });
         break;
@@ -318,7 +327,8 @@ class Renderer {
     const ctx = this.ctx, G = CFG.BLAST_TELEGRAPH;
     for (const b of (this.game.blastsActive || [])) {
       const f = Math.min(1, b.t / G);
-      const ease = 1 - Math.pow(1 - f, 3);
+      const ease = f;   // steady linear growth — the danger zone is readable
+                        // for its whole expansion, not over in a blink
       const r = Math.max(2, b.radius * ease);
       const fiery = b.burn > 0;
       ctx.fillStyle = fiery

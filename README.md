@@ -28,7 +28,10 @@ Locally, just open `index.html` in any modern browser (it works from `file://` t
 - The **shop runs only before the first battle and between battles** — never mid-battle.
   Money and purchased ammo **carry over**; HP and fuel reset each battle.
 - Each turn: change barrel angle, pick power (or drag on the field to aim & fire),
-  optionally drive (fuel!), choose ammo, fire. **Wind is re-rolled every turn.**
+  optionally drive (fuel!), choose ammo, fire. **Your angle, power and selected
+  ammo are remembered for your next turn** — artillery is played by correcting,
+  so you only ever fine-tune. **Wind is re-rolled every turn and it bites
+  hard** (up to ±12 — lead it or lose it).
 - Turn resolution is strictly ordered, so nothing "happens behind your back":
   1. the shot resolves — every projectile finishes, and each explosive shows its
      **damage circle growing** from the impact point,
@@ -55,17 +58,22 @@ Locally, just open `index.html` in any modern browser (it works from `file://` t
 
 All ammo lives in one table in [`js/config.js`](js/config.js) — copy an entry, change
 numbers, and it shows up in the shop and the AI's decisions automatically. Behaviors
-are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `cluster`, `roll`,
-`multiblast`, `addground`). Current lineup:
+are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cluster`,
+`roll`, `multiblast`, `addground`). Current lineup:
 
 | Ammo | Effect |
 |---|---|
 | Basic Shot | free, unlimited |
-| Cluster Bomb | splits at the apex into 4 bomblets raining down |
+| Cluster Bomb | splits at the apex, **scattering bomblets very wide** — bomblets never explode, only direct hits count |
 | Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows |
 | Napalm | huge fire radius, **wide shallow crater** (`craterY` squashes the dig) |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
+
+Every explosion's **damage circle** (`explosion.radius`) is deliberately decoupled
+from the **crater** it digs (`explosion.crater` × radius) — grow one without
+growing the other. All damage radii are 1.5× by design; the circles are
+telegraphed on screen before anything detonates, so bigger danger stays fair.
 
 Example of adding your own in seconds:
 
@@ -83,7 +91,27 @@ Example of adding your own in seconds:
 
 - **Drag on the field** to aim & fire, or: ←/→ angle, ↑/↓ power, **Space** fire,
   **1–6** select ammo, **A/D** drive.
+- Your aim (angle/power) and chosen ammo **carry over to your next turn** —
+  correct like a real artillery spotter instead of re-dialing from scratch.
 - Setup screen picks players (HUMAN/CPU mix), seat names, and battle count.
+
+## The CPU (and how to make it nicer or meaner)
+
+The AI simulates real ballistics against the terrain, **remembers its last shot and
+where it landed, and brackets you like a human**: short → more power, long → less,
+off to the side → angle tweak. It finishes wounded tanks first, avoids parking its
+own blast next to itself, and won't spend bought ammo when a free Basic Shot would
+score the same hit. It aims with **tunable human imperfection** — all in
+`js/config.js`:
+
+```js
+AI_JITTER_ANGLE: 3.0,   // degrees of sloppiness on the final pick
+AI_JITTER_POWER: 5,     // power units of sloppiness
+AI_WIND_BLUNDER: 1.6,   // how wrong it "reads" the wind
+AI_TOPK: 3,             // picks randomly among its best K plans
+```
+
+Set them near zero for a brutal tournament CPU, raise them for a fun-beatable one.
 
 ## Tests
 

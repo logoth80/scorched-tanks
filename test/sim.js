@@ -90,6 +90,26 @@ const dugFlat = dugAmount(11, 0.55);
 check('craterY=0.55 digs a shallower wide crater', dugFlat < dugFull * 0.75,
   'flat=' + dugFlat + ' full=' + dugFull);
 
+/* the bug that made everything pass through terrain: fractional lookups */
+{
+  const t6 = new SE.Terrain(CFG.W, CFG.H);
+  t6.generate(SE.util.mulberry32(42));
+  const fx = 640, fy = t6.tops[640] + 12;          // deep underground, no dig here
+  check('solid() sees ground at fractional coordinates',
+    t6.solid(fx, fy) && t6.solid(fx + 0.4, fy + 0.6) && t6.solid(fx + 0.9, fy + 11.5));
+  /* and end to end: a shell dropped on a mountain stops AT the surface */
+  const t7 = new SE.Terrain(CFG.W, CFG.H);
+  t7.generate(SE.util.mulberry32(42));
+  const ctx7 = { terrain: t7, tanks: [], wind: 0, W: CFG.W, spawn: function () {} };
+  const drop = SE.Weapons.createVelocity('basic', 300, t7.tops[300] - 60, 0, 4, null);
+  const ev7 = [];
+  for (let f = 0; f < 400 && !drop.dead; f++) SE.Weapons.step(drop, ctx7, ev7);
+  const hit = ev7.find(function (e) { return e.type === 'blast'; });
+  check('projectile stops at the real surface, not at the map bottom',
+    !!hit && hit.y < t7.tops[300] + 6 && hit.y < CFG.H - 60,
+    'y=' + (hit ? hit.y.toFixed(1) : 'none') + ' (floor at ' + CFG.H + ')');
+}
+
 /* ---------------- 2. weapon behaviors ---------------- */
 console.log('[weapons]');
 function runProj(p, maxFrames) {
@@ -133,6 +153,12 @@ check('dirt bomb adds ground instead of digging',
 r = runProj(SE.Weapons.create('napalm', 200, 200, 45, 7, 0), 600);
 check('napalm passes craterY through to the blast event',
   r.events.some(function (e) { return e.type === 'blast' && e.craterY === 0.55; }));
+
+// bomblets: they interact with the terrain but NEVER detonate
+r = runProj(SE.Weapons.create('clusterlet', 300, 100, 60, 6, 0), 600);
+check('bomblets thud into terrain without any blast',
+  r.events.every(function (e) { return e.type !== 'blast'; }) &&
+  r.events.some(function (e) { return e.type === 'fx' && e.kind === 'spark'; }));
 
 /* ---------------- 3. turn pipeline: strict order + terrain effects ------ */
 console.log('[turn pipeline]');
@@ -207,6 +233,26 @@ function bareGame(seed) {                 // 2 humans, 1 battle, at first turn
   g.startTurn(1);                          // seat 1's turn begins
   check('opponent shield fades when their turn begins',
     g.players[1].shield === false, 'p1=' + g.players[1].shield);
+}
+
+/* the player's angle/power and shot feedback survive into the next turn */
+{
+  const g = bareGame(34);                        // humans-only, seat 0 at aim
+  g.aimTo(0, 77, 42);
+  g.fire();
+  let guard = 0;
+  while ((g.state === 'flight' || g.state === 'resolve') && guard++ < 5000) g.tick();
+  check('shot completed, next player is up',
+    g.state === 'aim' && g.currentId === 1, 'state=' + g.state + ' current=' + g.currentId);
+  check('shot memory was recorded (angle + impact)',
+    !!g.players[0].lastShot && Math.abs(g.players[0].lastShot.angle - 77) < 0.01 &&
+    !!g.players[0].lastImpact,
+    'lastShot=' + JSON.stringify(g.players[0].lastShot && g.players[0].lastShot.angle) +
+    ' lastImpact=' + (g.players[0].lastImpact ? 'ok' : 'missing'));
+  g.startTurn(0);                                // next round, same player
+  check('angle and power remembered for the next turn',
+    Math.abs(g.players[0].angle - 77) < 0.01 && Math.abs(g.players[0].power - 42) < 0.01,
+    'now ' + g.players[0].angle + '/' + g.players[0].power);
 }
 
 /* ---------------- 4. full matches to termination ---------------- */

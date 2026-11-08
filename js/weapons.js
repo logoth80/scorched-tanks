@@ -3,6 +3,7 @@
  * A projectile is just data; what it DOES is chosen by `def.behavior`.
  * Behaviors implemented here — new weapons from config reuse them:
  *   'explode'     fly → single blast
+ *   'thud'        fly → lands with a small spark, NO explosion (bomblets)
  *   'cluster'     fly → split at the apex into child projectiles
  *   'roll'        fly → land → roll down the mountain → blast when stopped
  *   'multiblast'  fly → 3 staggered blasts (Big Bomb)
@@ -100,6 +101,10 @@ const Weapons = {
     p.dead = true;
     if (b === 'cluster') { // reached ground without splitting
       this._split(p, ctx, out);
+      return;
+    }
+    if (b === 'thud') {   // bomblets: they interact with terrain, they never blow up
+      out.push({ type: 'fx', kind: 'spark', x: p.x, y: p.y, owner: p.owner });
       return;
     }
     if (b === 'multiblast') {

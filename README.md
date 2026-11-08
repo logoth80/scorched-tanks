@@ -21,8 +21,9 @@ Deploy from a branch → default branch / root** — it will serve `index.html` 
   spawn slots themselves are re-shuffled between seats**, so seat 1 is not "always the
   left one" (each tank still keeps a guaranteed personal slice, no spawning on top
   of each other).
-- **Who starts each round is random:** the play order of every turn-cycle is
-  re-shuffled — inside a battle you never know who fires next.
+- **Turn order is dealt when a new map spawns** (a random shuffle of the seats) and
+  then **stays fixed for that whole fight** — dead tanks are simply skipped. Only the
+  next battle's fresh map re-deals it.
 - CPU tanks get **random nicknames** (Boomhild, Baron Blitz, Anzio Annie…) from
   `js/names.js` — unique per game, kept for the whole match, easy to extend.
 - The **shop runs only before the first battle and between battles** — never mid-battle.
@@ -160,8 +161,8 @@ The engine is DOM-free, so the whole game can be simulated headless:
 ```sh
 node test/sim.js      # terrain invariants, open map borders, every weapon incl.
                       # liquid-fire flow/kill rules, power cap, strict turn pipeline,
-                      # nicknames, re-shuffled round order, random spawn slots,
-                      # multi-battle match flow, 5 seeded full matches + an 8P match
+                      # nicknames, per-map-dealt (fight-fixed) turn order, random spawn
+                      # slots, multi-battle match flow, 5 seeded full matches + an 8P match
 node test/stress.js   # 40 seeded matches: all must terminate
 ```
 
@@ -173,7 +174,7 @@ node test/stress.js   # 40 seeded matches: all must terminate
 | `js/names.js` | CPU nickname list — add/remove entries freely, the game draws from it |
 | `js/terrain.js` | pixel terrain: one bit per pixel, hole collapse + slope slumping, liquid-fire fluid |
 | `js/weapons.js` | projectile behaviors shared by all ammo definitions |
-| `js/game.js` | match/battle/turn state machine, resolution order, round-order shuffle, economy |
+| `js/game.js` | match/battle/turn state machine, resolution order, turn-order dealing, economy |
 | `js/ai.js` | CPU aiming (trajectory sampling against terrain) and shopping |
 | `js/render.js` | canvas: single-color terrain via dirty-rect repaint, sprites, effects |
 | `js/ui.js` | DOM: setup, shop, HUD, turn panel, scoreboard |
@@ -185,8 +186,9 @@ The brief said "tanks placed randomly each round" and "each round starts with a 
 Since battles now reshape the map, placement and shops are done **per battle** (fresh
 terrain + random placement each battle; shop before each battle). A "round" inside a
 battle means one turn cycle of every living tank — that's what the storm counts.
-"Randomise who starts the round" is implemented as **re-shuffling the whole cycle
-order** every round (which is strictly more random than only picking a starter), and
+"Randomise who starts the round" is implemented as **dealing a shuffled order when
+each new map spawns and keeping it fixed for that entire fight** — random per battle,
+predictable mid-fight (dead tanks are skipped); and
 "player location should be random" is done by **re-dealing spawn slots to seats**
 each battle — the per-seat guaranteed spacing still holds because the guarantee is
 positional, not seat-based.

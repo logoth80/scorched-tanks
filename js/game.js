@@ -21,10 +21,11 @@
  *      only starts once the fire has vanished (FIRE_WAIT_MAX cap)
  *   ... only then does the next turn (or the next battle) begin.
  *
- *   WHO PLAYS WHEN: each turn-cycle inside a battle starts in a NEWLY
- *   SHUFFLED order (who starts the round is random), and every battle
- *   re-shuffles WHICH spawn slot each seat gets. CPU seats draw one-off
- *   nicknames from names.js that last the whole match.
+ *   WHO PLAYS WHEN: the play order is DEALT (shuffled) when a new map
+ *   spawns and stays FIXED for that whole fight — dead tanks are skipped,
+ *   and the next battle's fresh map re-deals it. Spawn slots are likewise
+ *   dealt to random seats per battle. CPU seats draw one-off nicknames
+ *   from names.js that last the whole match.
  * ===================================================================== */
 (function (root) {
 'use strict';
@@ -69,7 +70,8 @@ class Game {
 
     this.state = 'idle';          // idle | between | shop | aim | flight | resolve | over
     this.round = 0;              // turn-cycles inside the current battle (for the storm)
-    this.roundOrder = [];        // WHO plays in the current cycle — re-shuffled every round
+    this.roundOrder = [];        // the fight's play order — dealt per new map, fixed in-battle
+    this.turnPtr = 0;            // position inside roundOrder for the current cycle
     this.turnIdx = -1;
     this.currentId = -1;
     this.wind = 0;
@@ -143,6 +145,9 @@ class Game {
       p.lastShot = null; p.lastImpact = null;  // but bought ammo + selection stay
     }
     this.placeTanks();
+    // turn order is DEALT when a new map spawns — it stays fixed for the
+    // whole fight and is re-dealt only when the next battle generates terrain
+    this._dealTurnOrder();
     this.emit('battleStart', { battle: this.battle, total: this.totalBattles, first: !!first });
     this.openShop();
   }
@@ -319,7 +324,7 @@ class Game {
     if (!p.human) this.aiTimer = 55 + Math.floor(this.rand() * 55);
   }
 
-  _beginRound() {   // every player has shot — a NEW cycle starts in random order
+  _beginRound() {   // every player has shot — the SAME order starts over
     this.round++;
     this.emit('round', { round: this.round, battle: this.battle });
     if (this.round >= CFG.STORM_FROM_ROUND) {
@@ -334,12 +339,27 @@ class Game {
     this._startCycle();
   }
 
-  /* WHO STARTS each cycle is random: shuffle the living seats. */
-  _startCycle() {
-    const ids = [];
-    for (const p of this.players) if (p.alive) ids.push(p.id);
-    this.roundOrder = this._shuffle(ids);
-    this.startTurn(this.roundOrder[0] != null ? this.roundOrder[0] : this.firstAliveSeat());
+  /* The play order is dealt EXACTLY ONCE PER MAP (_nextBattle shuffles the
+     seats). It never changes during a fight — dead tanks are simply skipped
+     — and only the next battle's fresh map re-deals it. */
+  _dealTurnOrder() {
+    this.roundOrder = this._shuffle(this.players.map(function (p) { return p.id; }));
+    this.turnPtr = 0;
+  }
+
+  _startCycle() {   // next turn-cycle: start again from the head of that order
+    this.turnPtr = 0;
+    if (!this._takeNextTurn()) this.startTurn(this.firstAliveSeat());
+  }
+
+  /* step from turnPtr to the NEXT ALIVE seat in the fixed order */
+  _takeNextTurn() {
+    const ps = this.players;
+    for (let i = this.turnPtr; i < this.roundOrder.length; i++) {
+      const id = this.roundOrder[i];
+      if (ps[id].alive) { this.turnPtr = i; this.startTurn(id); return true; }
+    }
+    return false;
   }
 
   aimTo(pid, angle, power) {
@@ -718,14 +738,12 @@ class Game {
   _turnDone() {
     this.emit('turnEnd', { playerId: this.currentId });
     if (this.aliveCount() <= 1) { this._endOfBattle(); return; }
-    // drop whoever just shot (and anyone who died mid-cycle) from the order
-    const cur = this.currentId;
-    const ps = this.players;
-    this.roundOrder = this.roundOrder.filter(function (id) {
-      return id !== cur && ps[id].alive;
-    });
-    if (!this.roundOrder.length) { this._beginRound(); return; }  // cycle done → re-shuffle
-    this.startTurn(this.roundOrder[0]);
+    // the fight's order is FIXED: step past whoever just shot, skipping
+    // any tank that died mid-fight — nobody ever re-rolls during a battle
+    const at = this.roundOrder.indexOf(this.currentId);
+    this.turnPtr = (at >= 0 ? at : this.turnPtr) + 1;
+    if (this._takeNextTurn()) return;
+    this._beginRound();   // everyone had a turn → storm counter, then the SAME order again
   }
 }
 

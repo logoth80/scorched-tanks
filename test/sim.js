@@ -7,8 +7,8 @@
  *  3. ammunition ↔ terrain interaction through the real turn pipeline:
  *     blast circles grow BEFORE damage, ground changes only at resolve,
  *     then settle, then tanks
- *  3.5 nicknames from names.js (unique, per-game), round order
- *     re-shuffled every cycle, spawn slots assigned to random seats
+ *  3.5 nicknames from names.js (unique, per-game), turn order dealt per
+ *     map and fixed during a fight, spawn slots assigned to random seats
  *  4. full matches (multi-battle): shop exactly once per battle,
  *     fresh terrain+placement each battle, money/ammo carry over,
  *     storms keep matches finite
@@ -578,7 +578,7 @@ console.log('[names]');
     new Set(SE.NAMES).size === SE.NAMES.length && SE.NAMES.length >= 16);
 }
 
-console.log('[round order]');
+console.log('[turn order — dealt per map, fixed during a fight]');
 {
   const firsts = {};
   for (let s = 1; s <= 8; s++) {
@@ -588,19 +588,34 @@ console.log('[round order]');
     while (g.state !== 'aim' && guard++ < 4000) g.tick();   // CPUs shop by themselves
     firsts[s] = g.currentId;
   }
-  check('the first cycle of a battle starts at a RANDOM seat (not always seat 1)',
+  check('each new map starts the fight from a RANDOM seat (not always seat 1)',
     new Set(Object.keys(firsts).map(function (k) { return firsts[k]; })).size >= 2,
     JSON.stringify(firsts));
+
   const g = new SE.Game({ seed: 3, seats: seatset(4), battles: 1 });
   g.start();
   let guard = 0;
   while (g.state !== 'aim' && guard++ < 4000) g.tick();
-  check('a cycle order contains every living player EXACTLY once',
-    g.roundOrder.slice().sort().join(',') === '0,1,2,3', g.roundOrder.join(','));
-  const seen = new Set([g.roundOrder.join(',')]);
-  for (let r = 0; r < 10; r++) { g._beginRound(); seen.add(g.roundOrder.join(',')); }
-  check('EVERY new turn-cycle reshuffles who plays in what order',
-    seen.size >= 4, 'distinct orders=' + seen.size);
+  const battleOrder = g.roundOrder.slice();
+  check('a dealt order contains every player EXACTLY once',
+    battleOrder.slice().sort().join(',') === '0,1,2,3', battleOrder.join(','));
+  const seen = new Set([battleOrder.join(',')]);
+  const starters = new Set([g.currentId]);
+  for (let r = 0; r < 10; r++) { g._beginRound(); seen.add(g.roundOrder.join(',')); starters.add(g.currentId); }
+  check('during a fight the order NEVER changes — every round replays the same sequence',
+    seen.size === 1 && starters.size === 1 && g.currentId === battleOrder[0],
+    'orders=' + JSON.stringify([...seen]) + ' starters=' + JSON.stringify([...starters]));
+
+  const g2 = new SE.Game({ seed: 7, seats: seatset(4), battles: 3 });
+  g2.start();                                   // map 1 dealt
+  const deals = [g2.roundOrder.join(',')];
+  g2._nextBattle(false); deals.push(g2.roundOrder.join(','));   // new map → re-dealt
+  g2._nextBattle(false); deals.push(g2.roundOrder.join(','));
+  check('each dealt order is a complete permutation',
+    deals.every(function (o) { return o.split(',').slice().sort().join(',') === '0,1,2,3'; }),
+    deals.join(' // '));
+  check('ONLY a new map changes it — battle 2+ get a freshly dealt order',
+    new Set(deals).size >= 2, deals.join(' // '));
 }
 
 console.log('[random spawn slots]');

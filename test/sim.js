@@ -170,9 +170,44 @@ function runProj(p, maxFrames) {
 let r = runProj(SE.Weapons.create('basic', 100, 100, 45, 8, 0), 600);
 check('basic produces a blast', r.events.some(function (e) { return e.type === 'blast'; }));
 
-r = runProj(SE.Weapons.create('cluster', 500, 300, 60, 9, 0), 600);
-check('cluster splits at apex into 4 bomblets', r.spawned.length === 4,
-  'spawned=' + r.spawned.length);
+/* cluster: splits into a 3-bomb RANGE LADDER just before the apex.
+   Flat test bed so the three impact points are measurable. */
+{
+  const tC = new SE.Terrain(CFG.W, CFG.H);
+  for (let x = 0; x < CFG.W; x++) {
+    tC.tops[x] = 500; tC.counts[x] = CFG.H - 500;
+    for (let y = 500; y < CFG.H; y++) tC.data[y * CFG.W + x] = 1;
+  }
+  const kids = [];
+  const ctxC = {
+    terrain: tC, tanks: [], wind: 0, W: CFG.W,
+    spawn: function (id, x, y, vx, vy, o) { kids.push({ id: id, x: x, y: y, vx: vx, vy: vy, o: o }); },
+  };
+  const parent = SE.Weapons.create('cluster', 100, 498, 55, 9, 0);
+  const evP = [];
+  for (let f = 0; f < 900 && !parent.dead; f++) SE.Weapons.step(parent, ctxC, evP);
+  check('cluster splits into EXACTLY 3 bomblets just BEFORE the apex (still rising)',
+    kids.length === 3 && parent.vy < 0 && parent.vy >= -0.4,
+    'kids=' + kids.length + ' vy_at_split=' + (parent.vy || 0).toFixed(2));
+  const S = SE.weaponById('cluster').split;
+  check('children: first rides the ORIGINAL trajectory, others are boosted further',
+    kids.every(function (k, i) {
+      return k.id === 'clusterlet' &&
+        Math.abs(k.vx - parent.vx * S.boosts[i]) < 1e-9 && Math.abs(k.vy - parent.vy) < 1e-9;
+    }), JSON.stringify(kids.map(function (k) { return k.vx.toFixed(2); })));
+  const hits = [];
+  for (const k of kids) {
+    const c = SE.Weapons.createVelocity('clusterlet', k.x, k.y, k.vx, k.vy, 0);
+    const evK = [];
+    for (let f = 0; f < 900 && !c.dead; f++) SE.Weapons.step(c, ctxC, evK);
+    const bl = evK.find(function (e) { return e.type === 'blast'; });
+    hits.push(bl ? bl.x : null);
+  }
+  check('the ladder lands 3 blasts in increasing range, WIDENING gaps',
+    hits.every(function (h) { return h != null; }) &&
+    hits[1] > hits[0] + 12 && hits[2] - hits[1] > hits[1] - hits[0],
+    'hits=' + JSON.stringify(hits));
+}
 
 // slope for the roller: create one with add, then settle it
 const terr2 = new SE.Terrain(CFG.W, CFG.H);
@@ -342,6 +377,34 @@ function levelBasin(T, cx, halfW) {
     v.alive && v.hp === CFG.HP, 'hp=' + v.hp);
 }
 
+/* the NEXT PLAYER waits until the fire has completely vanished.
+   Mid-battle ground is already stable — pre-settle, so the fire's life
+   cannot be consumed by the initial settling of a raw generated map. */
+{
+  const g = bareGame(71);
+  let nP = 0; while (g.terrain.settleStep() && nP++ < 9000);
+  g.wind = 0;
+  const p = g.players[0];
+  p.shield = true; g.players[1].shield = true;   // nobody dies during this test
+  p.ammo = p.ammo || {}; p.ammo.napalm = 1;      // engine grants ammo via shop; grant here
+  g.aimTo(p.id, 90, 40);
+  g.selectWeapon(p.id, 'napalm');
+  g.fire();
+  let sawBurn = false, maxBurn = 0, guard = 0;
+  while (guard++ < 4000 && g.state !== 'aim') {
+    g.tick();
+    if (g.state === 'resolve' && g.resPhase === 'burn') {
+      sawBurn = true;
+      maxBurn = Math.max(maxBurn, g.burnWait);
+    }
+  }
+  check('turn resolution HOLDS while the ground burns (burn phase exists)',
+    sawBurn && maxBurn >= 60, 'sawBurn=' + sawBurn + ' held=' + maxBurn);
+  check('next player only starts once the fire is gone',
+    g.state === 'aim' && g.current().id === 1 && !g.terrain.hasFire(),
+    'state=' + g.state + ' current=' + g.current().id + ' fire=' + g.terrain.hasFire());
+}
+
 /* power may be raised to POWER_MAX through the game layer too */
 {
   const g = bareGame(59);
@@ -486,11 +549,15 @@ console.log('[full matches]');
 function playMatch(seed, seats, battles, maxTicks) {
   const g = new SE.Game({ seed: seed, seats: seats, battles: battles });
   const info = {
-    shopBuyers: 0, explosions: 0, battleEnds: [], battleStarts: [],
+    shopBuyers: 0, explosions: 0, landings: 0, battleEnds: [], battleStarts: [],
     solidAtStart: 0, moneyAtEnd: 0,
   };
   g.on('shopBuyer', function () { info.shopBuyers++; });
-  g.on('fx', function (e) { if (e.kind === 'explosion') info.explosions++; });
+  g.on('fx', function (e) {
+    if (e.kind === 'explosion') info.explosions++;
+    if (e.kind === 'explosion' || e.kind === 'fire' || e.kind === 'thud' ||
+        e.kind === 'direct' || e.kind === 'spark') info.landings++;
+  });
   g.on('battleStart', function (e) { info.battleStarts.push(e.battle); });
   g.on('battleEnd', function (e) { info.battleEnds.push(e); });
   g.start();
@@ -512,8 +579,8 @@ for (const s of seeds) {
   check('seed ' + s + ': sole survivor gets the win',
     alive.length !== 1 || g.winner === alive[0].id,
     'winner=' + g.winner + ' alive=' + alive.length);
-  check('seed ' + s + ': ammunition actually detonated on the map',
-    res.info.explosions >= 1, 'explosions=' + res.info.explosions);
+  check('seed ' + s + ': ammunition actually landed on the map (blast, fire, roll or hit)',
+    res.info.landings >= 1, 'landings=' + res.info.landings + ' explosions=' + res.info.explosions);
   // sanity: no NaNs anywhere
   let nan = false;
   for (const p of g.players) if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(p.hp) || !isFinite(p.money)) nan = true;

@@ -39,7 +39,10 @@ Locally, just open `index.html` in any modern browser (it works from `file://` t
      dirt mounds built),
   3. **the ground falls**: soil collapses into every hole and slumps down over-steep
      slopes until stable (mass is exactly conserved),
-  4. **tanks fall** if their ground went away, and **fall damage** is applied.
+  4. **tanks fall** if their ground went away, and **fall damage** is applied,
+  5. **burning ground keeps burning**: if any liquid fire is still alive, the game
+     *waits right there* — the next player only starts **once the fire has
+     vanished** (hard-capped by `FIRE_WAIT_MAX` so it can never hang forever).
 - Direct hit / **tank fully inside a blast circle = 100 damage = always lethal**
   (measured to the tank's farthest corner). Blast damage falls off only for tanks
   *partially* inside the shown circle. Shields block either case.
@@ -73,19 +76,23 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 | Ammo | Effect |
 |---|---|
 | Basic Shot | free, unlimited |
-| Cluster Bomb | splits at the apex, **scattering bomblets very wide**; bomblets drift down slowly and each makes a **small blast** — area denial, not one big crater |
+| Cluster Bomb | **splits just before its apex into 3 bomblets**: one continues on the original trajectory, one lands a bit further, one further still — a range ladder of small blasts |
 | Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows |
 | Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; see below |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
 
-**Liquid fire** is a per-column fluid (`js/terrain.js`: `fire[]` + flow/burn rules):
-its surface seeks level, so it genuinely runs down mountains and fills low ground;
-it burns for `fire.life` frames, then shrinks away. Touching it hurts over time
-(`FIRE_DOT` every `FIRE_TICK` frames); a tank **fully submerged** in the fluid
+**Liquid fire** is a per-column fluid (`js/terrain.js`: `fire[]` + flow/burn rules).
+It behaves like heavy liquid fuel: it **spreads sideways only slowly** (gentle
+surface leveling), but **slides fast down any slope** and fills valleys and low
+ground; it burns for `fire.life` frames, then shrinks away. Touching it hurts over
+time (`FIRE_DOT` every `FIRE_TICK` frames); a tank **fully submerged** in the fluid
 (depth ≥ tank height) dies on the spot — unless shielded. The fire's owner gets
 credit for the kill, and the kill's battle-death order feeds the outlast payout.
-All knobs (`FIRE_MAX/FLOW/MIN_LEVEL/KEEP/BURNOUT/DOT/TICK`) are in `config.js`.
+And the turn **does not pass on while the ground is burning**: resolution simply
+waits until the fire has vanished (capped by `FIRE_WAIT_MAX`). All knobs
+(`FIRE_MAX/FLOW/MIN_LEVEL/SLIDE/SLIDE_STEP/SLIDE_DEPTH/KEEP/BURNOUT/DOT/TICK/WAIT_MAX`)
+are in `config.js`.
 
 Every explosion's **damage circle** (`explosion.radius`) is deliberately decoupled
 from the **crater** it digs (`explosion.crater` × radius) — every *explosive* weapon

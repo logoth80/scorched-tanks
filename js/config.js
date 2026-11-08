@@ -68,12 +68,16 @@ SE.CONFIG = {
      touching it is hurt every FIRE_TICK frames; FULLY submerged
      (depth ≥ TANK_H) it dies. All sizes in px per ground column. */
   FIRE_MAX: 26,             // max depth of burning fluid per column
-  FIRE_FLOW: 1.5,           // max px transferred between neighbours per pass
-  FIRE_MIN_LEVEL: 0.8,      // below this surface difference fire stops flowing
+  FIRE_FLOW: 0.5,           // max px transferred between neighbours per pass (SLOW spreading)
+  FIRE_MIN_LEVEL: 0.8,      // below this surface difference fire stops leveling out
+  FIRE_SLIDE: 1.4,          // max px per pass flowing DOWNHILL along the ground slope
+  FIRE_SLIDE_STEP: 1.0,     // min ground drop (px/col) that starts downhill sliding
+  FIRE_SLIDE_DEPTH: 0.7,    // fire must be at least this deep to slide
   FIRE_KEEP: 0.997,         // slow burn-down while still alive
   FIRE_BURNOUT: 0.8,        // fast shrink once its time is up
   FIRE_DOT: 6,              // damage per tick while merely touched by fire
   FIRE_TICK: 12,            // frames between fire damage ticks
+  FIRE_WAIT_MAX: 560,       // a turn WAITS for burning ground to vanish; hard cap (frames)
 
   /* Tanks — small simple sprites */
   TANK_W: 20,
@@ -170,14 +174,14 @@ SE.WEAPONS = [
   },
   {
     id: 'cluster', name: 'Cluster Bomb', price: 600, count: 3,
-    desc: 'Splits at the top of its arc, scattering bomblets over a WIDE area. They drift down slowly and pop in small blasts.',
+    desc: 'Splits just BEFORE the top of its arc into 3 bomblets: one follows the original trajectory, the other two land progressively further on. They pop in small blasts.',
     color: '#ffb347', trail: 'rgba(255,179,71,0.5)', size: 3,
     launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.1, drag: 0 },
     behavior: 'cluster',
-    split: {
-      n: 4, minTime: 40, maxTime: 320, child: 'clusterlet', inherit: 0.55,
-      spread: { minAngle: 18, maxAngle: 162, speed: 3.2, jitter: 1.5 },
-    },
+    /* ladder split: at apVy ≈ the apex is reached (still rising slightly),
+       3 children are born with the PARENT's velocity scaled by boosts —
+       child 1 = the original path, child 2/3 = further downrange */
+    split: { atVy: -0.35, boosts: [1.0, 1.28, 1.6], child: 'clusterlet' },
   },
   {
     id: 'clusterlet', name: 'Bomblet', hidden: true,

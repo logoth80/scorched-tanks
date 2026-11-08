@@ -174,10 +174,14 @@ class Terrain {
 
   /* ---------- liquid fire (napalm) — a burning FLUID on the ground -------
      fire[x] = depth in px of burning fluid on top of ground column x.
-     It flows like a liquid (surfaces level out, so it runs down mountains
-     and fills pits/valleys), stays alive for fireTtl frames, then burns
-     itself away. It never digs or adds soil — the ground only changes from
-     ordinary blasts. ------------------------------------------------------ */
+     TWO separate flow rules (so it behaves like heavy liquid fuel):
+       1. LEVELING (slow): spreads only while its free SURFACE is uneven
+          — this is gentle, fire does not "splash" sideways fast.
+       2. SLIDING (faster): fire on sloped ground keeps moving toward the
+          LOWER GROUND even when its surface is already level — that is
+          what makes it run down mountains and fill valleys.
+     It stays alive for fireTtl frames, then burns itself away. It never
+     digs or adds soil — the ground only changes from ordinary blasts. -- */
   addFire(cx, r, depth, ttl, owner) {
     cx |= 0; r |= 0;
     if (r <= 0 || depth <= 0) return;
@@ -196,28 +200,34 @@ class Terrain {
 
   /* one flow+burn pass — call once per game frame while fire is present */
   stepFire() {
-    const W = this.W, G = SE.CONFIG, fire = this.fire, ttl = this.fireTtl;
+    const W = this.W, G = SE.CONFIG, fire = this.fire, ttl = this.fireTtl, tops = this.tops;
     this._fflip ^= 1;
     const xs = this._fflip ? 0 : W - 2, xe = this._fflip ? W - 2 : 0, st = this._fflip ? 1 : -1;
     for (let x = xs; st > 0 ? x <= xe : x >= xe; x += st) {
-      const a = fire[x], b = fire[x + 1];
-      if (a <= 0 && b <= 0) continue;
-      /* fluid SURFACE height (smaller y = higher): ground top minus depth */
-      const diff = (this.tops[x + 1] - b) - (this.tops[x] - a);
-      if (Math.abs(diff) < G.FIRE_MIN_LEVEL) continue;
-      const amt = Math.min(Math.abs(diff) / 2, G.FIRE_FLOW, diff > 0 ? a : b);
-      if (amt <= 0) continue;
+      if (fire[x] <= 0 && fire[x + 1] <= 0) continue;
+      let src = -1, dst = -1, amt = 0;
+      /* rule 1 — slow LEVELING toward a flat fluid surface */
+      const diff = (tops[x + 1] - fire[x + 1]) - (tops[x] - fire[x]);
+      if (Math.abs(diff) >= G.FIRE_MIN_LEVEL) {
+        src = diff > 0 ? x : x + 1; dst = diff > 0 ? x + 1 : x;
+        amt = Math.min(Math.abs(diff) / 2, G.FIRE_FLOW, fire[src]);
+      }
+      /* rule 2 — SLIDING down the ground slope; this one dominates */
+      const gd = tops[x + 1] - tops[x];             // >0: ground drops to the right
+      if (Math.abs(gd) >= G.FIRE_SLIDE_STEP) {
+        const s2 = gd > 0 ? x : x + 1, d2 = gd > 0 ? x + 1 : x;
+        if (fire[s2] >= G.FIRE_SLIDE_DEPTH) {
+          const a2 = Math.min(fire[s2], fire[s2] * 0.45, G.FIRE_SLIDE);
+          if (a2 > amt) { src = s2; dst = d2; amt = a2; }
+        }
+      }
+      if (src < 0 || amt <= 0) continue;
+      fire[src] -= amt; fire[dst] += amt;
       /* the burning STATE travels with the fluid: the receiver inherits the
          donor's remaining life, so fire flowing down a hill still burns */
-      if (diff > 0) {
-        fire[x] = a - amt; fire[x + 1] = b + amt;
-        if (ttl[x] > ttl[x + 1]) { ttl[x + 1] = ttl[x]; this.fireOwner[x + 1] = this.fireOwner[x]; }
-      } else {
-        fire[x] = a + amt; fire[x + 1] = b - amt;
-        if (ttl[x + 1] > ttl[x]) { ttl[x] = ttl[x + 1]; this.fireOwner[x] = this.fireOwner[x + 1]; }
-      }
-      if (fire[x] < 0.02) fire[x] = 0;
-      if (fire[x + 1] < 0.02) fire[x + 1] = 0;
+      if (ttl[src] > ttl[dst]) { ttl[dst] = ttl[src]; this.fireOwner[dst] = this.fireOwner[src]; }
+      if (fire[src] < 0.02) fire[src] = 0;
+      if (fire[dst] < 0.02) fire[dst] = 0;
     }
     for (let x = 0; x < W; x++) {
       if (ttl[x] > 0) { ttl[x]--; fire[x] *= G.FIRE_KEEP; }

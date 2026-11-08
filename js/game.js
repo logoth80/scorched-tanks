@@ -450,6 +450,7 @@ class Game {
     this.resPhase = 'blasts';
     this.resolveTimer = 0;
     this.tankQuiet = 0;
+    this.burnWait = 0;
     this._setState('resolve');
   }
 
@@ -498,7 +499,23 @@ class Game {
       let anyFalling = false;
       for (const p of this.players) if (p.alive && p.falling) anyFalling = true;
       if (!anyFalling) this.tankQuiet++; else this.tankQuiet = 0;
-      if (this.tankQuiet >= 15 || this.resolveTimer > 1500) this._turnDone();
+      if (this.tankQuiet >= 15 || this.resolveTimer > 1500) {
+        // NEXT PLAYER waits until the burning ground has vanished completely
+        // (the fire keeps flowing + hurting the whole time; hard-capped)
+        if (this.resolveTimer <= 1500 && this.terrain.hasFire()) {
+          this.resPhase = 'burn';
+          this.burnWait = 0;
+        } else {
+          this._turnDone();
+        }
+      }
+      return;
+    }
+
+    if (this.resPhase === 'burn') {
+      // phase 5 (only while ground is on fire): the fire ticks in tick()
+      this.burnWait++;
+      if (!this.terrain.hasFire() || this.burnWait >= (CFG.FIRE_WAIT_MAX || 600)) this._turnDone();
     }
   }
 
@@ -594,6 +611,11 @@ class Game {
         this.emit('fx', { kind: 'direct', x: e.tank.x, y: e.tank.y - CFG.TANK_H / 2 });
         if (e.owner != null && this.players[e.owner]) {
           this.players[e.owner].lastImpact = { x: e.tank.x, y: e.tank.y };
+        }
+        if (e.def && e.def.behavior === 'fire' && e.def.fire) {
+          // a napalm canister that hits a tank still pours its burning fluid
+          const f = e.def.fire;
+          this.terrain.addFire(e.tank.x, f.radius, f.depth, f.life, e.owner);
         }
         this.damage(e.tank, CFG.DIRECT_DAMAGE, e.owner, 'direct');
       } else if (e.type === 'fx') {

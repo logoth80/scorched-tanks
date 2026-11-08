@@ -4,7 +4,8 @@
  * Behaviors implemented here — new weapons from config reuse them:
  *   'explode'     fly → single blast
  *   'thud'        fly → lands with a small spark, NO explosion
- *   'cluster'     fly → split at the apex into child projectiles
+ *   'cluster'     fly → split just before the apex into 3 children with
+ *                 scaled-up horizontal speed (a range ladder)
  *   'roll'        fly → land → roll down the mountain → blast when stopped
  *   'multiblast'  fly → 3 staggered blasts (Big Bomb)
  *   'addground'   fly → builds a mound of dirt instead of digging (Dirt Bomb)
@@ -51,9 +52,11 @@ const Weapons = {
   _fly(p, ctx, out) {
     const def = p.def, L = def.launch;
 
-    // cluster fuse: split at the top of the arc (or after maxTime)
-    if (def.behavior === 'cluster' && p.t > (def.split.minTime || 0)) {
-      if ((p.vy >= 0 && p.prevVy < 0) || p.t > (def.split.maxTime || 320)) {
+    // cluster fuse: split JUST BEFORE the top of the arc, into a range ladder
+    if (def.behavior === 'cluster') {
+      const s = def.split;
+      if (p.vy < s.atVy - 0.4) p.rose = true;          // clearly still climbing
+      if (p.rose && p.vy >= s.atVy) {                  // apex reached any frame now
         this._split(p, ctx, out);
         return;
       }
@@ -102,7 +105,7 @@ const Weapons = {
       return;
     }
     p.dead = true;
-    if (b === 'cluster') { // reached ground without splitting
+    if (b === 'cluster') { // shot never peaked (fired downhill): burst at contact
       this._split(p, ctx, out);
       return;
     }
@@ -140,18 +143,17 @@ const Weapons = {
       craterY: ex.craterY, burn: ex.burn || 0 });
   },
 
-  /* ---------------- cluster split ---------------- */
+  /* ---------------- cluster split: a 3-bomb RANGE LADDER -----------------
+     At the last moment before the apex every bomblet keeps the parent's
+     current velocity — child 1 travels the ORIGINAL trajectory, child 2 is
+     boosted to land "slightly further", child 3 further again. Boosting
+     horizontal speed near the apex is exactly how you lengthen a range. -- */
   _split(p, ctx, out) {
     const s = p.def.split;
     p.dead = true;
-    const dir = Math.sign(p.vx) || 1;
-    for (let i = 0; i < s.n; i++) {
-      const aDeg = -(s.spread.minAngle + Math.random() * (s.spread.maxAngle - s.spread.minAngle));
-      const a = aDeg * DEG;
-      const spd = s.spread.speed + Math.random() * s.spread.jitter;
-      const vx = p.vx * s.inherit + dir * Math.cos(a) * spd;
-      const vy = p.vy * s.inherit - Math.sin(a) * spd;   // negative angle → downward
-      ctx.spawn(s.child, p.x, p.y - 2, vx, vy, p.owner);
+    for (let i = 0; i < s.boosts.length; i++) {
+      const m = s.boosts[i];
+      ctx.spawn(s.child, p.x, p.y - 2, p.vx * m, p.vy, p.owner);
     }
     out.push({ type: 'fx', kind: 'burst', x: p.x, y: p.y });
   },

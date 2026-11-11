@@ -234,14 +234,17 @@ SE.WEAPONS = [
   },
   {
     id: 'fissure', name: 'Fissure Bomb', price: 350, count: 3,
-    desc: 'NO blast, NO damage — it RIPS A LONG JAGGED FISSURE across the ground: a ~370 px crack that swallows anything standing over it and keeps its walls forever (nothing slumps in). Pure terrain work.',
+    desc: 'NO blast, NO damage. First a THIN crack tears across the ground and HANGS there for a full second — then the whole strip COLLAPSES into a thick jagged pit, like a blast that skipped the boom. Anything standing over it goes in; the walls stay forever (nothing slumps in).',
     color: '#8fd6a8', trail: 'rgba(143,214,168,0.5)', size: 3,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'fissure',
     nodamage: true,                 // stops against a hull without hurting it
-    /* jagged crack: deepest at the centre, tapering toward both ends,
-       deterministic from position — the same shot tears the same crack */
-    fissure: { halfLen: 186, maxDepth: 46 },
+    /* TWO beats: a thin crack (thinDepth) appears and hangs `delay` frames,
+       then the span collapses to maxDepth across a THICK core (coreFrac —
+       full depth inside it, steep shoulders to nothing at the ends).
+       Deterministic from position: the same shot carves the same pit, and
+       stage 2 lines up exactly with the thin crack (same jag). */
+    fissure: { halfLen: 110, maxDepth: 46, thinDepth: 9, coreFrac: 0.55, delay: 60 },
   },
   {
     id: 'big', name: 'Big Bomb', price: 600, count: 1,

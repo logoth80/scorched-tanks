@@ -592,9 +592,13 @@ console.log('[fissure bomb]');
     })());
 }
 {
-  /* full pipeline: the crack is DEFERRED to resolve, opens jagged, keeps
-     its sharp walls (nothing slumps in), and is fully deterministic */
+  /* full pipeline: the crack is DEFERRED to resolve, appears THIN first and
+     HANGS ~1 s, then the span COLLAPSES into a THICK jagged pit; sharp
+     walls survive settling, and the whole thing is fully deterministic */
   const spec = SE.weaponById('fissure').fissure;
+  check('the pit is COMPACT and THICK by design (span ≤120, flat core ≥50%, deep)',
+    spec.halfLen <= 120 && spec.coreFrac >= 0.5 && spec.maxDepth >= 40,
+    'spec=' + JSON.stringify(spec));
   const g = bareGame(71);
   const T = g.terrain;
   const bx = levelBasin(T, 500, 150, { flat: 200 });
@@ -604,30 +608,42 @@ console.log('[fissure bomb]');
   check('a fissure never reshapes the ground early — it waits for resolve',
     T.countSolid() === m0, 'removed ' + (m0 - T.countSolid()));
   g._startResolve();
-  let guard = 0;
-  while (g.state === 'resolve' && guard++ < 4000) g.tick();
+  let thinMax = 0, deepAt = -1, guard = 0;
+  while (g.state === 'resolve' && guard++ < 6000) {
+    g.tick();
+    const dNow = T.tops[bx] - pre[bx];
+    if (g.resPhase === 'fissureWait') thinMax = Math.max(thinMax, dNow);
+    else if (deepAt < 0 && dNow >= spec.maxDepth * 0.35) deepAt = guard;
+  }
+  check('the THIN crack appears first and HANGS there — nothing thick during the pause',
+    thinMax >= 2 && thinMax <= spec.thinDepth + 2, 'thinMax=' + thinMax);
+  check('…and the ground COLLAPSES to full depth only AFTER that ~1 s pause',
+    deepAt >= 55, 'collapse at resolve-tick ' + deepAt);
   const drop = T.tops[bx] - pre[bx];
-  check('the fissure opens: the centre floor drops by a real crack depth',
+  check('the collapse drops the centre floor by a real pit depth',
     drop >= spec.maxDepth * 0.35, 'drop=' + drop);
   let edgeShift = 0;
   for (let x = bx + spec.halfLen + 8; x <= bx + spec.halfLen + 40; x++)
     edgeShift += Math.abs(T.tops[x] - pre[x]);
-  check('ground beyond the crack rim is never touched', edgeShift === 0, 'shift=' + edgeShift);
-  check('the crack only REMOVES ground — nothing is built', T.countSolid() < m0);
+  check('ground beyond the pit rim is never touched', edgeShift === 0, 'shift=' + edgeShift);
+  check('the pit only REMOVES ground — nothing is built', T.countSolid() < m0);
   let jagged = 0;
   for (let x = bx - spec.halfLen + 2; x < bx + spec.halfLen - 2; x++)
     jagged = Math.max(jagged, Math.abs(T.tops[x] - T.tops[x + 1]));
-  check('the crack is a JAGGED rip, not a clean round trench', jagged >= 2, 'max step=' + jagged);
-  let nearBand = 0, farBand = 0;
+  check('the collapsed floor is a JAGGED rip, not a clean round trench', jagged >= 2, 'max step=' + jagged);
+  let coreSum = 0, coreN = 0, farSum = 0, farN = 0;
   for (let x = Math.max(0, bx - spec.halfLen); x <= Math.min(CFG.W - 1, bx + spec.halfLen); x++) {
-    if (T.tops[x] <= pre[x]) continue;
+    const d = T.tops[x] - pre[x];
     const r = Math.abs(x - bx) / spec.halfLen;
-    if (r <= 0.2) nearBand++;
-    else if (r >= 0.62 && r <= 0.88) farBand++;
+    if (r <= 0.4) { coreSum += d; coreN++; }
+    else if (r >= 0.62 && r <= 0.88) { farSum += d; farN++; }
   }
-  check('the FISSURE IS LONG — it cuts real depth through the near AND far bands of its whole span',
-    nearBand >= 60 && farBand >= 20, 'near=' + nearBand + ' far=' + farBand);
-  check('the full-depth crack SURVIVES settling — sharp walls, no slumping',
+  const coreAvg = coreSum / Math.max(1, coreN), farAvg = farSum / Math.max(1, farN);
+  check('THICK: the CORE plateau drops to near-full depth on average',
+    coreAvg >= spec.maxDepth * 0.7, 'coreAvg=' + coreAvg);
+  check('DEEP to the rim: even the FAR bands cut well past mere crack depth',
+    farAvg >= spec.maxDepth * 0.3, 'farAvg=' + farAvg);
+  check('the collapsed pit SURVIVES settling — sharp walls, no slumping',
     T.tops[bx] - pre[bx] === drop);
   const g2 = bareGame(71);
   const T2 = g2.terrain;
@@ -635,10 +651,10 @@ console.log('[fissure bomb]');
   g2._applyEvents([{ type: 'fissure', x: bx2, y: T2.top(bx2), owner: 0, spec: spec }]);
   g2._startResolve();
   let guard2 = 0;
-  while (g2.state === 'resolve' && guard2++ < 4000) g2.tick();
+  while (g2.state === 'resolve' && guard2++ < 6000) g2.tick();
   let diff = 0;
   for (let x = 0; x < CFG.W; x++) diff += Math.abs(T.tops[x] - T2.tops[x]);
-  check('the same shot tears the EXACT same crack (deterministic)', diff === 0, 'diff=' + diff);
+  check('the same shot carves the EXACT same pit (both beats deterministic)', diff === 0, 'diff=' + diff);
 }
 {
   /* a tank standing over the crack FALLS IN — ground gone, no teleport */

@@ -15,8 +15,10 @@
  *                 explode normally (Funny Bomb). Children carry a `def.fuse`
  *                 countdown: they sit still while the main blast detonates,
  *                 so the order on screen is BLAST FIRST, then the shots.
- *   'fissure'     fly → tear a LONG JAGGED CRACK in the ground — no blast,
- *                 no damage (def.nodamage: hulls stop it harmlessly).
+ *   'fissure'     fly → a THIN CRACK tears open and hangs ~1 s, then the
+ *                 span COLLAPSES into a thick pit and settles like a blast
+ *                 (game.js 'fissureWait' phase). No blast, no damage
+ *                 (def.nodamage: hulls stop it harmlessly).
  *
  * Optional def fields honoured by the flier: `fuse` (frames to wait in
  * place before flight begins) — used to order chain weapons correctly.

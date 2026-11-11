@@ -548,6 +548,7 @@ class Game {
     this.resolveTimer = 0;
     this.tankQuiet = 0;
     this.burnWait = 0;
+    this.fissureStage = [];
     this._setState('resolve');
   }
 
@@ -569,28 +570,51 @@ class Game {
             this.emit('fx', { kind: 'dirt', x: a.x, y: a.y, r: a.r });
           }
           this.pendingAdds = [];
-    this.pendingFissures = [];
         }
         if (this.pendingFissures.length) {
-          /* the Fissure Bomb tears the ground here — same strict order as
-             digs/mounds: nothing terrain-shaping happens mid-flight */
+          /* STAGE 1 of the Fissure Bomb: a THIN crack tears open across the
+             whole span and just HANGS there — a second of visible warning. */
+          this.fissureStage = [];
           for (const fr of this.pendingFissures) {
             const f = fr.spec;
             const salt = (fr.x | 0) ^ ((this.battleNo || 0) * 0x9e37);
-            this.terrain.crack(fr.x, f.halfLen, f.maxDepth, salt);
-            this.terrain.crack(((fr.x - f.halfLen * 0.55) | 0), (f.halfLen * 0.3) | 0,
-              (f.maxDepth * 0.35) | 0, salt ^ 0x51ed);   // short offshoot cracks
-            this.terrain.crack(((fr.x + f.halfLen * 0.62) | 0), (f.halfLen * 0.35) | 0,
-              (f.maxDepth * 0.3) | 0, salt ^ 0x2f11);
-            this.emit('fx', { kind: 'thud', x: fr.x - f.halfLen * 0.7, y: this.terrain.top(fr.x) });
-            this.emit('fx', { kind: 'thud', x: fr.x, y: this.terrain.top(fr.x) });
-            this.emit('fx', { kind: 'thud', x: fr.x + f.halfLen * 0.7, y: this.terrain.top(fr.x) });
-            if (fr.owner != null && this.players[fr.owner]) {
-              this.players[fr.owner].lastImpact = { x: fr.x, y: this.terrain.top(fr.x) };
-            }
+            this.terrain.crack(fr.x, f.halfLen, f.thinDepth, salt, 1, 2);
+            this.emit('fx', { kind: 'spark', x: fr.x - f.halfLen * 0.6, y: this.terrain.top(fr.x) });
+            this.emit('fx', { kind: 'spark', x: fr.x, y: this.terrain.top(fr.x) });
+            this.emit('fx', { kind: 'spark', x: fr.x + f.halfLen * 0.6, y: this.terrain.top(fr.x) });
+            this.fissureStage.push({ x: fr.x, owner: fr.owner, spec: f, salt: salt });
           }
           this.pendingFissures = [];
+          this.resPhase = 'fissureWait';
+          this.fissureWait = 0;
+          return;
         }
+        this.resPhase = 'settle';
+        this._settleStart();
+      }
+      return;
+    }
+
+    if (this.resPhase === 'fissureWait') {
+      /* STAGE 2: after the pause the ground COLLAPSES — the same span drops
+         to full depth as one thick pit — and settling then runs exactly as
+         it does after any blast. */
+      this.fissureWait++;
+      let need = 0;
+      for (const s of this.fissureStage) need = Math.max(need, s.spec.delay || 60);
+      if (this.fissureWait >= (need || 60)) {
+        for (const s of this.fissureStage) {
+          const f = s.spec;
+          this.terrain.crack(s.x, f.halfLen,
+            Math.max(4, f.maxDepth - f.thinDepth), s.salt, f.coreFrac || 0.55, 0);
+          this.emit('fx', { kind: 'thud', x: s.x - f.halfLen * 0.7, y: this.terrain.top(s.x) });
+          this.emit('fx', { kind: 'thud', x: s.x, y: this.terrain.top(s.x) });
+          this.emit('fx', { kind: 'thud', x: s.x + f.halfLen * 0.7, y: this.terrain.top(s.x) });
+          if (s.owner != null && this.players[s.owner]) {
+            this.players[s.owner].lastImpact = { x: s.x, y: this.terrain.top(s.x) };
+          }
+        }
+        this.fissureStage = [];
         this.resPhase = 'settle';
         this._settleStart();
       }

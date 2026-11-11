@@ -159,20 +159,26 @@ class Terrain {
     this.addRect(cx - r, cy - r, 2 * r + 1, 2 * r + 1);
   }
 
-  /* ---------- the Fissure Bomb: tear a long jagged crack ----------
-     Pure ground removal with a jagged depth profile: deepest at the centre,
-     tapering toward both ends. Deterministic from position + salt — the same
-     shot tears exactly the same crack. Nothing "slumps" after: with vertical
-     settling only, the fissure keeps its sharp walls forever. */
-  crack(cx, halfLen, maxDepth, salt) {
+  /* ---------- the Fissure Bomb: a thick jagged pit, in two beats ----------
+     Stage 1 tears a THIN crack across the whole span (it HANGS there as a
+     visible warning); stage 2 "collapses" the same span down to full depth.
+     The depth profile is THICK: full depth across the core, dropping off on
+     steep shoulders to nothing at the ends — a compact pit, not a long
+     taper. Deterministic from position + salt: the same shot carves exactly
+     the same pit, and stage 2 aligns with the thin crack (same jag). */
+  crack(cx, halfLen, maxDepth, salt, coreFrac, minDepth) {
     cx |= 0; halfLen |= 0;
     if (halfLen <= 0) return;
+    const core = (coreFrac > 0 && coreFrac <= 1) ? coreFrac : 0.55;
+    const minD = minDepth > 0 ? (minDepth | 0) : 0;
     const x0 = Math.max(0, cx - halfLen), x1 = Math.min(this.W - 1, cx + halfLen);
     for (let x = x0; x <= x1; x++) {
-      const d = Math.abs(x - cx) / (halfLen + 1);        // 0 centre → ~1 edge
+      const d = Math.abs(x - cx) / (halfLen + 1);          // 0 centre → ~1 edge
       if (d >= 1) continue;
+      const shoulder = Math.min(1, (1 - d) / (1 - core));  // plateau, then steep
       const jag = 0.55 + 0.45 * crackRand(x, salt);
-      const depth = Math.round(maxDepth * (1 - d) * jag);
+      let depth = Math.round(maxDepth * shoulder * jag);
+      if (depth < minD) depth = minD;
       if (depth <= 0) continue;
       const top = this.tops[x];
       const y1 = Math.min(this.H - 1, top + depth - 1);

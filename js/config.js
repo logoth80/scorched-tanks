@@ -234,17 +234,17 @@ SE.WEAPONS = [
   },
   {
     id: 'fissure', name: 'Fissure Bomb', price: 350, count: 3,
-    desc: 'NO blast, NO damage. First a THIN crack tears across the ground and HANGS there for a full second — then the whole strip COLLAPSES into a thick jagged pit, like a blast that skipped the boom. Anything standing over it goes in; the walls stay forever (nothing slumps in).',
+    desc: 'NO blast, NO damage. The hit FIRES LIGHTNING-BOLT TUNNELS through the ground: a web of jagged, branching fissures tears down and out from the impact, hollowing the rock while the surface above still stands. One second of silence — then gravity resumes and the ground COLLAPSES into a wide field of sinking hollows. Anything standing on it rides the ground down.',
     color: '#8fd6a8', trail: 'rgba(143,214,168,0.5)', size: 3,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'fissure',
     nodamage: true,                 // stops against a hull without hurting it
-    /* TWO beats: a thin crack (thinDepth) appears and hangs `delay` frames,
-       then the span collapses to maxDepth across a THICK core (coreFrac —
-       full depth inside it, steep shoulders to nothing at the ends).
-       Deterministic from position: the same shot carves the same pit, and
-       stage 2 lines up exactly with the thin crack (same jag). */
-    fissure: { halfLen: 110, maxDepth: 46, thinDepth: 9, coreFrac: 0.55, delay: 60 },
+    /* at impact: branching tunnels (bolts, forking `forks` deep) are bored
+       through the ground inside this reach/depth box, `tunnel` px wide; the
+       first bolt is a near-vertical trunk so the impact column sinks most.
+       The surface holds for `delay` frames, then normal settling collapses
+       it. Deterministic from position — same shot, same tunnel web. */
+    fissure: { reach: 150, depth: 95, bolts: 9, tunnel: 3.4, forks: 2, delay: 60 },
   },
   {
     id: 'big', name: 'Big Bomb', price: 600, count: 1,

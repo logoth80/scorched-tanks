@@ -572,17 +572,18 @@ class Game {
           this.pendingAdds = [];
         }
         if (this.pendingFissures.length) {
-          /* STAGE 1 of the Fissure Bomb: a THIN crack tears open across the
-             whole span and just HANGS there — a second of visible warning. */
+          /* Fissure Bomb: the impact FIRES LIGHTNING-BOLT TUNNELS through
+             the solid ground — a branching web of empty spaces forms under
+             a surface that (mostly) keeps standing, holding its drama… */
           this.fissureStage = [];
           for (const fr of this.pendingFissures) {
             const f = fr.spec;
             const salt = (fr.x | 0) ^ ((this.battleNo || 0) * 0x9e37);
-            this.terrain.crack(fr.x, f.halfLen, f.thinDepth, salt, 1, 2);
-            this.emit('fx', { kind: 'spark', x: fr.x - f.halfLen * 0.6, y: this.terrain.top(fr.x) });
-            this.emit('fx', { kind: 'spark', x: fr.x, y: this.terrain.top(fr.x) });
-            this.emit('fx', { kind: 'spark', x: fr.x + f.halfLen * 0.6, y: this.terrain.top(fr.x) });
-            this.fissureStage.push({ x: fr.x, owner: fr.owner, spec: f, salt: salt });
+            const gy = Math.min(CFG.H - 2, this.terrain.top(fr.x) + 2);
+            this.terrain.lightning(fr.x, gy, f, salt);
+            for (let i = -2; i <= 2; i++)
+              this.emit('fx', { kind: 'spark', x: fr.x + i * f.reach * 0.45, y: gy + f.depth * 0.25 });
+            this.fissureStage.push({ x: fr.x, owner: fr.owner, spec: f });
           }
           this.pendingFissures = [];
           this.resPhase = 'fissureWait';
@@ -596,20 +597,16 @@ class Game {
     }
 
     if (this.resPhase === 'fissureWait') {
-      /* STAGE 2: after the pause the ground COLLAPSES — the same span drops
-         to full depth as one thick pit — and settling then runs exactly as
-         it does after any blast. */
+      /* …one full second of ground hanging over its brand-new hollows.
+         Then GRAVITY RESUMES: the settle phase is the exact one any blast
+         uses, so the ground collapses down into the voids and the tanks
+         phase that follows drops any tank whose floor went lower. */
       this.fissureWait++;
       let need = 0;
       for (const s of this.fissureStage) need = Math.max(need, s.spec.delay || 60);
       if (this.fissureWait >= (need || 60)) {
         for (const s of this.fissureStage) {
-          const f = s.spec;
-          this.terrain.crack(s.x, f.halfLen,
-            Math.max(4, f.maxDepth - f.thinDepth), s.salt, f.coreFrac || 0.55, 0);
-          this.emit('fx', { kind: 'thud', x: s.x - f.halfLen * 0.7, y: this.terrain.top(s.x) });
           this.emit('fx', { kind: 'thud', x: s.x, y: this.terrain.top(s.x) });
-          this.emit('fx', { kind: 'thud', x: s.x + f.halfLen * 0.7, y: this.terrain.top(s.x) });
           if (s.owner != null && this.players[s.owner]) {
             this.players[s.owner].lastImpact = { x: s.x, y: this.terrain.top(s.x) };
           }

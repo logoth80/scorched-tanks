@@ -159,33 +159,61 @@ class Terrain {
     this.addRect(cx - r, cy - r, 2 * r + 1, 2 * r + 1);
   }
 
-  /* ---------- the Fissure Bomb: a thick jagged pit, in two beats ----------
-     Stage 1 tears a THIN crack across the whole span (it HANGS there as a
-     visible warning); stage 2 "collapses" the same span down to full depth.
-     The depth profile is THICK: full depth across the core, dropping off on
-     steep shoulders to nothing at the ends — a compact pit, not a long
-     taper. Deterministic from position + salt: the same shot carves exactly
-     the same pit, and stage 2 aligns with the thin crack (same jag). */
-  crack(cx, halfLen, maxDepth, salt, coreFrac, minDepth) {
-    cx |= 0; halfLen |= 0;
-    if (halfLen <= 0) return;
-    const core = (coreFrac > 0 && coreFrac <= 1) ? coreFrac : 0.55;
-    const minD = minDepth > 0 ? (minDepth | 0) : 0;
-    const x0 = Math.max(0, cx - halfLen), x1 = Math.min(this.W - 1, cx + halfLen);
+  /* ---------- Fissure Bomb: LIGHTNING-BOLT TUNNELS under the ground -----
+     From the impact point a web of jagged, BRANCHING tunnels tears down and
+     out through the solid ground — empty spaces under a surface that is
+     deliberately left standing. The game holds gravity off for a beat; when
+     normal settling resumes, everything above the voids collapses straight
+     down, sinking the ground into an irregular field of collapse hollows.
+     Deterministic: the whole web comes from salt-seeded position hashes —
+     the same shot bores the same tunnels. */
+  lightning(cx, cy, spec, salt) {
+    cx |= 0; cy |= 0;
+    const reach = spec.reach | 0, depth = spec.depth | 0;
+    const tr = spec.tunnel > 0 ? spec.tunnel : 3;
+    const bolts = Math.max(1, spec.bolts | 0), forkMax = spec.forks | 0;
+    const yTop = Math.max(0, cy - 2);                       // spread DOWN and out
+    const yBot = Math.min(this.H - 1, cy + depth);
+    const xL = Math.max(1, cx - reach), xR = Math.min(this.W - 2, cx + reach);
+    for (let b = 0; b < bolts; b++) {
+      /* start direction: mostly DOWN, fanned left/right from straight down;
+         the FIRST bolt is a near-vertical trunk so the impact column always
+         hollows deepest */
+      const fan = b === 0 ? 0.25 : 1.15;
+      let ang = -fan + crackRand(b * 7919, salt ^ 0x6d2b) * fan * 2; // rad from "down"
+      const steps = (10 + ((crackRand(b * 131 + 7, salt) * 7) | 0)) + (b === 0 ? 6 : 0);
+      const stack = [[cx, cy, ang, steps, 0]];              // main bolt + forks
+      while (stack.length) {
+        const seg = stack.pop();
+        let sx = seg[0], sy = seg[1], sa = seg[2], sl = seg[3], dep = seg[4];
+        for (let s = 0; s < sl; s++) {
+          sa += -0.42 + crackRand((sx | 0) * 3 + s + dep * 977, salt ^ (b * 131 + dep * 17)) * 0.84;
+          sa *= 0.72;                                       // keep it heading down
+          const len = 3.5 + crackRand((sy | 0) * 7 + s, salt ^ (b * 71 + dep * 29)) * 4.5;
+          sx += Math.sin(sa) * len; sy += Math.cos(sa) * len;
+          if (sy > yBot || sy < yTop || sx < xL || sx > xR) break;
+          this.carveDisk(sx, sy, tr * (0.75 + crackRand((sx | 0) + (sy | 0) * 13, salt ^ (dep * 53)) * 0.5));
+          if (dep < forkMax && crackRand((sx | 0) * 11 + (sy | 0), salt ^ (b * 17 + dep * 331)) < 0.30) {
+            const side = crackRand((sx | 0) * 5 + s, salt ^ 0x77c1) < 0.5 ? -1 : 1;
+            const rem = Math.max(2, ((sl - s) * 0.65) | 0);
+            stack.push([sx, sy, sa + side * (0.55 + crackRand((sy | 0) + b, salt) * 0.5), rem, dep + 1]);
+          }
+        }
+      }
+    }
+  }
+
+  /* tunnel boring: clear a disc of solid pixels anywhere in the ground */
+  carveDisk(cx, cy, r) {
+    const x0 = Math.max(0, Math.ceil(cx - r)), x1 = Math.min(this.W - 1, Math.floor(cx + r));
+    const y0 = Math.max(0, Math.ceil(cy - r)), y1 = Math.min(this.H - 1, Math.floor(cy + r));
     for (let x = x0; x <= x1; x++) {
-      const d = Math.abs(x - cx) / (halfLen + 1);          // 0 centre → ~1 edge
-      if (d >= 1) continue;
-      const shoulder = Math.min(1, (1 - d) / (1 - core));  // plateau, then steep
-      const jag = 0.55 + 0.45 * crackRand(x, salt);
-      let depth = Math.round(maxDepth * shoulder * jag);
-      if (depth < minD) depth = minD;
-      if (depth <= 0) continue;
-      const top = this.tops[x];
-      const y1 = Math.min(this.H - 1, top + depth - 1);
+      const dx = x - cx, hh = Math.sqrt(Math.max(0, r * r - dx * dx));
+      const dy0 = Math.max(y0, Math.ceil(cy - hh)), dy1 = Math.min(y1, Math.floor(cy + hh));
       let removed = 0, lo = -1, hi = -1;
-      for (let y = top; y <= y1; y++) {
-        const idx = y * this.W + x;
-        if (this.data[idx]) { this.data[idx] = 0; removed++; if (lo < 0) lo = y; hi = y; }
+      for (let y = dy0; y <= dy1; y++) {
+        const i = y * this.W + x;
+        if (this.data[i]) { this.data[i] = 0; removed++; if (lo < 0) lo = y; hi = y; }
       }
       if (removed) {
         this.counts[x] -= removed;

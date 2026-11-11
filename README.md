@@ -99,7 +99,7 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 | Cluster Bomb | **splits just before its apex into 3 bomblets**: one continues on the original trajectory, one lands a bit further, one further still — a range ladder of **full-size (Basic-scale) blasts**; the drift is the trick, not weakness |
 | Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows with a **Basic-scale blast** |
 | Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; it only ever *drowns* a tank that is trapped **between high walls** (see below) |
-| Fissure Bomb | **no blast, no damage at all — it works on the terrain, in two beats**: first a **thin crack tears open** across a compact ~220 px span and just **hangs there for a full second** (sparks along its length — the ground is warning you). Then it **COLLAPSES**: the whole span drops to a **thick jagged pit**, ~46 px deep across a full-depth plateau core with steep walls tapering to nothing at the rims — like a blast that skipped the boom. Whatever stands over it loses its ground and falls in. Fully deterministic — the same shot carves the same pit — and since nothing ever slumps sideways, the pit's sharp walls are **permanent**: moats and valleys, at will |
+| Fissure Bomb | **no blast, no damage at all — it hollows the ground**: the impact **fires LIGHTNING-BOLT TUNNELS** through the rock — a web of 9 jagged, branching tunnels tears down and out from the impact point, leaving **empty spaces** under the surface (the first bolt is a near-vertical trunk, so the impact column hollows deepest). The ground **hangs over its new hollows for a full second** — then gravity resumes and the surface **COLLAPSES** into an irregular field of sinking hollows above the web: sinks and sunk ridges mirror the branching pattern exactly. Whatever stood on it rides the ground down (big drops hurt, as always). Fully deterministic — the same shot bores the same web |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
 | Leap Frog | **explodes on impact, then HOPS a long way forward and explodes again — three times over**: every stage is a **Basic-scale blast** and every leap carries ~150–200 px on open ground (a chain of plain table entries: `vx/vy` per hop, fully tunable) |
@@ -209,11 +209,12 @@ node test/sim.js      # terrain invariants (incl. the NO-SLUMP guarantee: intact
                       # mountains never move), open map borders, every weapon incl.
                       # liquid-fire flow + its drown-ONLY-between-high-walls rule
                       # (open ground never drowns, one wall is not "between"),
-                      # the fissure bomb (zero damage, TWO beats: thin crack
-                      # appears and hangs ~1 s, then the span collapses to a
-                      # thick flat-core pit that persists through settling,
-                      # both beats deterministic, swallows tanks, and the CPU
-                      # never fires or buys it), leap frog chain
+                      # the fissure bomb (zero damage; at impact a web of
+                      # lightning TUNNELS opens under the ground, the surface
+                      # HOLDS over the voids ~1 s, then settling collapses it
+                      # into an irregular sink field; deterministic; tanks
+                      # stand, then fall with their floor; the CPU never
+                      # fires or buys it), leap frog chain
                       # (full-size blasts + long hops) and funny-bomb fuse ordering,
                       # one-hit shields, burial crush, chaining wreck blasts
                       # (Basic-scale, like normal ammo), power cap, strict turn

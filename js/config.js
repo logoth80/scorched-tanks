@@ -234,14 +234,14 @@ SE.WEAPONS = [
   },
   {
     id: 'fissure', name: 'Fissure Bomb', price: 350, count: 3,
-    desc: 'NO blast, NO damage — it RIPS A LONG JAGGED FISSURE across the ground: a crack ~120 px wide that swallows anything standing over it and keeps its walls forever (nothing slumps in). Pure terrain work.',
+    desc: 'NO blast, NO damage — it RIPS A LONG JAGGED FISSURE across the ground: a ~370 px crack that swallows anything standing over it and keeps its walls forever (nothing slumps in). Pure terrain work.',
     color: '#8fd6a8', trail: 'rgba(143,214,168,0.5)', size: 3,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'fissure',
     nodamage: true,                 // stops against a hull without hurting it
     /* jagged crack: deepest at the centre, tapering toward both ends,
        deterministic from position — the same shot tears the same crack */
-    fissure: { halfLen: 62, maxDepth: 46 },
+    fissure: { halfLen: 186, maxDepth: 46 },
   },
   {
     id: 'big', name: 'Big Bomb', price: 600, count: 1,
@@ -261,8 +261,8 @@ SE.WEAPONS = [
     color: '#c98f5a', trail: 'rgba(201,143,90,0.5)', size: 3,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'addground',
-    add: { radius: 40, raise: 6 },
-    explosion: { radius: 39, damage: 25, crater: 0 },
+    add: { radius: 58, raise: 6 },
+    explosion: { radius: 52, damage: 25, crater: 0 },
   },
   {
     id: 'leapfrog', name: 'Leap Frog', price: 500, count: 2,
@@ -292,12 +292,12 @@ SE.WEAPONS = [
   },
   {
     id: 'funny', name: 'Funny Bomb', price: 450, count: 2,
-    desc: 'BOOM first — and only when that blast has actually gone off do THREE firecrackers pop out in RANDOM directions. Where they land is anybody\'s guess.',
+    desc: 'BOOM first — and only when that blast has actually gone off do THREE firecrackers pop out in WIDE RANDOM directions: some barely leave the crater, some fly almost sideways an entire ridge away. Anybody\'s guess.',
     color: '#ff8ad4', trail: 'rgba(255,138,212,0.55)', size: 3,
     launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'funny',
     explosion: { radius: 63, damage: 100, crater: 1.0 },
-    funny: { count: 3, child: 'funnylet', angleMin: 25, angleMax: 155, speedMin: 3.2, speedMax: 7.4 },
+    funny: { count: 3, child: 'funnylet', angleMin: 8, angleMax: 172, speedMin: 2.2, speedMax: 9.8 },
   },
   {
     id: 'funnylet', name: 'Firecracker', hidden: true,

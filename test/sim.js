@@ -618,6 +618,15 @@ console.log('[fissure bomb]');
   for (let x = bx - spec.halfLen + 2; x < bx + spec.halfLen - 2; x++)
     jagged = Math.max(jagged, Math.abs(T.tops[x] - T.tops[x + 1]));
   check('the crack is a JAGGED rip, not a clean round trench', jagged >= 2, 'max step=' + jagged);
+  let nearBand = 0, farBand = 0;
+  for (let x = Math.max(0, bx - spec.halfLen); x <= Math.min(CFG.W - 1, bx + spec.halfLen); x++) {
+    if (T.tops[x] <= pre[x]) continue;
+    const r = Math.abs(x - bx) / spec.halfLen;
+    if (r <= 0.2) nearBand++;
+    else if (r >= 0.62 && r <= 0.88) farBand++;
+  }
+  check('the FISSURE IS LONG — it cuts real depth through the near AND far bands of its whole span',
+    nearBand >= 60 && farBand >= 20, 'near=' + nearBand + ' far=' + farBand);
   check('the full-depth crack SURVIVES settling — sharp walls, no slumping',
     T.tops[bx] - pre[bx] === drop);
   const g2 = bareGame(71);

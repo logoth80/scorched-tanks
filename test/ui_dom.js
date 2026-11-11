@@ -168,6 +168,19 @@ p.ammo.shield = 1;
 check('the action the list entry calls raises the shield and spends the bag',
   g.useShield(p.id) === true && p.shield === true && p.ammo.shield === 0);
 
+/* the reported mouse bug: the list OPENED (button worked) but clicking an
+   entry did nothing — a CSS rule disabled pointer-events on '#ammoRow
+   button' for EVERY turn, so human clicks passed through to the canvas.
+   Pin the scope so it can never regress. */
+{
+  const css = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'style.css'), 'utf8');
+  check('pointer-events kill on the list is scoped to CPU turns only',
+    /cpuTurn #ammoRow button/.test(css) && !/, #ammoRow button/.test(css) &&
+    /#hud button \{ pointer-events: auto/.test(css),
+    'css scope check failed');
+}
+
 /* the wind flag is a pure DOM widget — terrain can never cover it,
    and it must read strength AND direction from the wind event */
 g.emit('wind', { wind: -9 });

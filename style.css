@@ -90,7 +90,10 @@ body { display: flex; align-items: center; justify-content: center; }
   border: 1px solid #2c3949; border-radius: 10px; padding: 8px 12px;
   pointer-events: auto;
 }
-#turnpanel.cpuTurn .tpRow button, #ammoRow button { pointer-events: none; opacity: .5; }
+/* NOTE: BOTH selectors must stay scoped to .cpuTurn. An unscoped "#ammoRow
+   button" here once made MOUSE clicks in the open list dead on a human turn
+   (they passed straight through to the canvas) — only number keys worked. */
+#turnpanel.cpuTurn .tpRow button, #turnpanel.cpuTurn #ammoRow button { pointer-events: none; opacity: .5; }
 #tpName { font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 7px; }
 #tpName span { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
 .tpRow { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; }

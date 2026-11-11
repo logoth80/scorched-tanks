@@ -38,8 +38,11 @@ Deploy from a branch → default branch / root** — it will serve `index.html` 
      **damage circle growing** from the impact point,
   2. the circle finishes growing → **ground and players take damage** (craters dug,
      dirt mounds built),
-  3. **the ground falls**: soil collapses into every hole and slumps down over-steep
-     slopes until stable (mass is exactly conserved),
+  3. **the ground falls — but ONLY unsupported ground**: a soil pixel drops
+     straight down exactly when the space under it is empty, until no holes
+     remain (mass is exactly conserved). There is no sideways slumping at
+     all: a mountainside keeps the exact shape it was generated with — a
+     column of land never collapses into a pyramid, ever,
   4. **tanks fall** if their ground went away, and **fall damage** is applied —
       and if the moved ground ends up **covering a tank's own column above its
       head, the tank dies right there buried** (it is *not* teleported up onto
@@ -103,10 +106,11 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 **Liquid fire** is a per-column fluid (`js/terrain.js`: `fire[]` + flow/burn rules).
 It behaves like heavy liquid fuel: it **spreads sideways only slowly** (gentle
 surface leveling), but **slides fast down any slope** and fills valleys and low
-ground; it burns for `fire.life` frames, then shrinks away. Touching it hurts over
-time (`FIRE_DOT` every `FIRE_TICK` frames); a tank **fully submerged** in the fluid
-(depth ≥ tank height) dies on the spot — a shield eats that hit once, the next one
-does not. The fire's owner gets
+ground; it burns for `fire.life` frames, then shrinks away. Contact with it **stings
+slowly on purpose** (`FIRE_DOT` every `FIRE_TICK` frames ≈ 5 HP/s — grazing fire
+hurts but never melts a tank); the real killer is **going fully under**: a tank
+**fully submerged** in the fluid (depth ≥ tank height) dies on the spot — a shield
+eats that hit once, the next one does not. The fire's owner gets
 credit for the kill, and the kill's battle-death order feeds the outlast payout.
 And the turn **does not pass on while the ground is burning**: resolution simply
 waits until the fire has vanished (capped by `FIRE_WAIT_MAX`). All knobs
@@ -188,7 +192,8 @@ Set them near zero for a brutal tournament CPU, raise them for a fun-beatable on
 The engine is DOM-free, so the whole game can be simulated headless:
 
 ```sh
-node test/sim.js      # terrain invariants, open map borders, every weapon incl.
+node test/sim.js      # terrain invariants (incl. the NO-SLUMP guarantee: intact
+                      # mountains never move), open map borders, every weapon incl.
                       # liquid-fire flow/kill rules, leap frog chain (full-size
                       # blasts + long hops) and funny-bomb fuse ordering,
                       # one-hit shields, burial crush, chaining wreck blasts
@@ -209,7 +214,7 @@ node test/ui_dom.js   # DOM-free smoke of the UI layer via a tiny DOM stub:
 |---|---|
 | `js/config.js` | **every tunable** — physics, economy, terrain stability, fire fluid, the ammo table |
 | `js/names.js` | CPU nickname list — add/remove entries freely, the game draws from it |
-| `js/terrain.js` | pixel terrain: one bit per pixel, hole collapse + slope slumping, liquid-fire fluid |
+| `js/terrain.js` | pixel terrain: one bit per pixel, purely vertical hole collapse (slopes NEVER slump sideways), liquid-fire fluid |
 | `js/weapons.js` | projectile behaviors shared by all ammo definitions |
 | `js/game.js` | match/battle/turn state machine, resolution order, turn-order dealing, economy |
 | `js/ai.js` | CPU aiming (trajectory sampling against terrain) and shopping |

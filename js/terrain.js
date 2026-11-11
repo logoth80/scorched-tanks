@@ -4,13 +4,12 @@
  * - per-column `tops` cache + solid counts for fast queries
  * - dig() / add() modify single pixels; every change registers a dirty
  *   rect so the renderer only repaints what changed
- * - settleStep() runs the two "pixels fall down" rules until stable:
- *     1) ANY hole collapses: each soil pixel above a void drops toward it —
- *        at most FALL_RATE px per pass, so ground visibly FALLS instead of
- *        teleporting; a column ends as a solid stack from the floor up
- *     2) over-steep slopes slump: the top slice of a too-high column
- *        slides onto its lower neighbour (angle of repose), at most
- *        SLUMP_MAX px per pass
+ * - settleStep() runs the ONE "pixels fall down" rule until stable:
+ *     ANY soil pixel with empty space directly below it drops toward it —
+ *     at most FALL_RATE px per pass, so ground visibly FALLS instead of
+ *     teleporting; a column ends as a solid stack from the floor up.
+ *   There is NO sideways redistribution on purpose: a column of land never
+ *   "slumps" into a pyramid — an intact slope stays exactly as generated.
  *   Mass is exactly conserved by settling; only dig/add change it.
  * ===================================================================== */
 (function (root) {
@@ -249,13 +248,15 @@ class Terrain {
     this.fireOwner.fill(-1);
   }
 
-  /* ---------- "land pixels fall down" — one relaxation pass ---------- */
-  _flip = 0;
+  /* ---------- "land pixels fall down" — one relaxation pass ----------
+     The ONLY rule: a soil pixel with empty space directly under it falls.
+     There is deliberately NO sideways slumping — a column of land keeps its
+     full height forever. An untouched mountain never "settles" at all. */
   settleStep() {
     const W = this.W, H = this.H, G = SE.CONFIG;
     let moved = 0;
 
-    /* rule 1: soil FALLS into holes — each pixel drops at most FALL_RATE px
+    /* soil FALLS into holes — each pixel drops at most FALL_RATE px
        per pass, so a collapse reads as ground falling, not teleporting.
        Bottom→top scan: every pixel moves at most once per pass. */
     const FR = Math.max(1, G.FALL_RATE | 0);
@@ -277,43 +278,10 @@ class Terrain {
         this.addRect(x, 0, 1, H);
         moved++;
       } else if (this.counts[x] !== H - this.tops[x]) {
-        /* self-heal: tops can go stale after slumps while the stack is
+        /* self-heal: tops can go stale after a collapse while the stack is
            actually fine — without this, settling deadlocks on a phantom top */
         this.refreshTop(x);
       }
-    }
-
-    /* rule 2: over-steep neighbours slump toward each other */
-    this._flip ^= 1;
-    const xs = this._flip ? 0 : W - 2;
-    const xe = this._flip ? W - 2 : 0;
-    const step = this._flip ? 1 : -1;
-    for (let x = xs; step > 0 ? x <= xe : x >= xe; x += step) {
-      const a = this.tops[x], b = this.tops[x + 1];
-      if (a === b) continue;
-      const excess = Math.abs(a - b) - G.REPOSE;
-      if (excess <= 0) continue;
-      const amt = Math.min(Math.ceil(excess / 2), G.SLUMP_MAX);
-      const hiCol = a < b ? x : x + 1;      // smaller top = higher column
-      const loCol = hiCol === x ? x + 1 : x;
-      const hTop = this.tops[hiCol], lTop = this.tops[loCol];
-      // move only a contiguous top slice; if a void stops the run, re-scan
-      let t = 0;
-      while (t < amt && hTop + t < H && this.data[(hTop + t) * W + hiCol]) t++;
-      if (t === 0) continue;
-      for (let i = 0; i < t; i++) {
-        this.data[(hTop + i) * W + hiCol] = 0;
-        this.data[(lTop - 1 - i) * W + loCol] = 1;
-      }
-      this.counts[hiCol] -= t;
-      this.counts[loCol] += t;
-      if (t === amt) this.tops[hiCol] = hTop + t;
-      else { this.tops[hiCol] = hTop; this.refreshTop(hiCol); }
-      this.tops[loCol] = Math.max(0, lTop - t);
-      const yMin = Math.min(lTop - t, hTop);
-      const yMax = Math.max(hTop + t - 1, lTop - 1);
-      this.addRect(Math.min(x, x + 1), yMin, 2, yMax - yMin + 1);
-      moved++;
     }
     return moved;
   }

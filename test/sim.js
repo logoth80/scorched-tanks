@@ -1,8 +1,8 @@
 /* =====================================================================
  * HEADLESS SIMULATION TEST — loads only the DOM-free engine modules and:
  *  1. terrain invariants: gen / dig / add / ALL holes collapse /
- *     slope slumping / mass conservation / wide-shallow crater scaling
- *  2. every weapon behavior (blast, cluster+small bomblet blasts, roller,
+ *     NO sideways slumping ever / mass conservation / crater scaling
+ *  2. every weapon behavior (blast, cluster ladder at full scale, roller,
  *     multiblast, dirt-add, napalm liquid fire) + fire hazard flow/kill rules
  *  3. ammunition ↔ terrain interaction through the real turn pipeline:
  *     blast circles grow BEFORE damage, ground changes only at resolve,
@@ -64,12 +64,19 @@ const mid = terr.countSolid();
 terr.add(200, terr.tops[200] - 20, 30, 0);
 check('add creates ground', terr.countSolid() > mid);
 
+/* THE rule the player sees: ONLY unsupported land moves. Columns far from
+   the blast and from the fresh mound must not budge a single pixel. */
+const topsBefore = terr.tops.slice();
 let massBefore = terr.countSolid(), passes = 0;
 while (terr.settleStep() && passes < 9000) passes++;
-let maxSlope = 0;
-for (let x = 0; x < CFG.W - 1; x++) maxSlope = Math.max(maxSlope, Math.abs(terr.tops[x] - terr.tops[x + 1]));
+let farShifted = 0;
+for (let x = 0; x < CFG.W; x++) {
+  if (Math.abs(x - 500) <= 50 || Math.abs(x - 200) <= 40) continue;  // dig / add zones
+  if (terr.tops[x] !== topsBefore[x]) farShifted++;
+}
 check('settling converges', passes < 9000, 'passes=' + passes);
-check('final slope <= repose', maxSlope <= CFG.REPOSE, 'max=' + maxSlope);
+check('the mountain itself never collapses: columns far from the action do not budge',
+  farShifted === 0, 'shifted columns=' + farShifted);
 check('settling conserves mass', terr.countSolid() === massBefore,
   terr.countSolid() + ' vs ' + massBefore);
 
@@ -79,6 +86,15 @@ for (let x = 0; x < CFG.W; x++) {
   for (let y = terr.tops[x]; y < CFG.H; y++) if (!terr.data[y * CFG.W + x]) holes++;
 }
 check('no holes remain anywhere after settling', holes === 0, 'holes=' + holes);
+
+/* the strongest form of the fix: an INTACT mountain settles nothing at all */
+{
+  const tR = new SE.Terrain(CFG.W, CFG.H);
+  tR.generate(SE.util.mulberry32(77));
+  const movedR = tR.settleStep();
+  check('untouched terrain settles NOTHING — not one pixel, no pyramid reshaping',
+    movedR === 0, 'moved=' + movedR);
+}
 
 /* a cave with a roof: the roof must fall into the void */
 const t5 = new SE.Terrain(CFG.W, CFG.H);
@@ -274,10 +290,13 @@ check('bomblets explode at FULL Basic scale (drifting is the trick, not weakness
   check('leap frog chains exactly 3 stages (3rd one has no further hop)',
     ids.join(',') === 'leapfrog,leapfrog2,leapfrog3', ids.join(','));
   check('leap frog makes EXACTLY 3 blasts — one per stage', totalBlasts === 3, 'blasts=' + totalBlasts);
-  check('every hop travels FORWARD or dies at the wall — never back, overall it marches downrange',
-    blastXs.length === 3 && blastXs[1] >= blastXs[0] && blastXs[2] >= blastXs[1] &&
-    blastXs[2] - blastXs[0] > 50,
-    JSON.stringify(blastXs.map(function (x) { return Math.round(x); })));
+  /* mountains KEEP their steep walls now, so a frog landing on a sharp ridge
+     legitimately crawls up it 1–3 px per hop — that is terrain doing what it
+     should. The CHAIN must be strictly forward; raw hop strength is asserted
+     separately on open ground below. */
+  check('every hop travels strictly FORWARD — never back (up a preserved ridge it climbs)',
+    blastXs.length === 3 && blastXs[1] > blastXs[0] && blastXs[2] > blastXs[1],
+    'xs=' + JSON.stringify(blastXs.map(function (x) { return Math.round(x); })));
 
   /* hops must be STRONG: on open ground every leap carries far. */
   const tL = new SE.Terrain(CFG.W, CFG.H);
@@ -490,8 +509,16 @@ function levelBasin(T, cx, halfW) {
     v.alive && v.hp === CFG.HP - CFG.FIRE_DOT, 'hp=' + v.hp + ' alive=' + v.alive);
   check('shallow fire never instant-kills (depth stays under TANK_H)',
     (() => { for (let x = bx - 10; x <= bx + 10; x++) if (T.fire[x] >= CFG.TANK_H) return false; return true; })());
+  /* contact must STING, not melt: 3+ seconds standing in a shallow pool
+     leaves a healthy tank — drowning in deep fluid is the real killer */
+  for (let i = 0; i < 180; i++) g._tickFire();
+  check('three seconds in shallow fire hurts but is survivable (≥80 hp left)',
+    v.alive && v.hp >= CFG.HP - Math.ceil(204 / CFG.FIRE_TICK) * CFG.FIRE_DOT && v.hp >= 80,
+    'hp=' + v.hp);
+  // fresh, long-lived pool: this checks the DOT rule, not fire lifespan
+  T.addFire(bx, 40, 8, 90000, 0);
   let guard = 0;
-  while (v.alive && guard++ < 900) g._tickFire();
+  while (v.alive && guard++ < 2000) g._tickFire();
   check('sustained contact with the fire pool eventually kills the tank',
     !v.alive && g.players[0].kills === 1);
 }
@@ -575,7 +602,7 @@ function levelBasin(T, cx, halfW) {
   check('ground after the blast is hole-free (settled)', holes2 === 0, 'holes=' + holes2);
 }
 
-/* dirt mounds are also built only at resolution, then slumped to stability */
+/* dirt mounds are built only at resolution — and they KEEP their shape */
 {
   const g = bareGame(32);
   const px = 300, py = g.terrain.top(300);
@@ -587,9 +614,8 @@ function levelBasin(T, cx, halfW) {
   while (g.state === 'resolve' && guard++ < 3000) g.tick();
   check('dirt mound built during resolve', g.terrain.countSolid() > m0,
     'added ' + (g.terrain.countSolid() - m0) + ' px');
-  let ms = 0;
-  for (let x = px - 90; x < px + 90; x++) ms = Math.max(ms, Math.abs(g.terrain.tops[x] - g.terrain.tops[x + 1]));
-  check('dirt mound slumps to a stable pile', ms <= CFG.REPOSE, 'max slope=' + ms);
+  check('the mound keeps the height it was piled to — nothing slumps into a pancake',
+    g.terrain.top(px) <= py - 25, 'top now=' + g.terrain.top(px) + ' ground was ' + py);
 }
 
 /* shields protect against everyone else, then fade — never forever */

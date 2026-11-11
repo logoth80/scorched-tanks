@@ -53,9 +53,10 @@ SE.CONFIG = {
   WIND_MAX: 12,             // wind is re-rolled every turn, in [-max, +max]
   WIND_ACCEL: 0.0026,       // horizontal acceleration per wind unit
 
-  /* Terrain stability — after any explosion, soil above this slope slumps */
-  REPOSE: 3,                // max stable height step between neighbour columns
-  SLUMP_MAX: 3,             // max px transferred per column pair per pass (lower = slower avalanche)
+  /* Terrain settling has exactly ONE rule: a soil pixel with EMPTY space
+     directly below it falls (at most FALL_RATE px per pass). Soil is NEVER
+     redistributed sideways — an intact mountainside keeps its shape forever;
+     only land whose support was blasted away moves. */
   FALL_RATE: 3,             // px a soil pixel drops per settling pass (lower = slower collapse)
 
   /* Open borders: terrain generation fades mountains down to low ground in
@@ -75,8 +76,8 @@ SE.CONFIG = {
   FIRE_SLIDE_DEPTH: 0.7,    // fire must be at least this deep to slide
   FIRE_KEEP: 0.997,         // slow burn-down while still alive
   FIRE_BURNOUT: 0.8,        // fast shrink once its time is up
-  FIRE_DOT: 6,              // damage per tick while merely touched by fire
-  FIRE_TICK: 12,            // frames between fire damage ticks
+  FIRE_DOT: 2,              // harm per tick while merely touched by fire (sting, not a killer)
+  FIRE_TICK: 24,            // frames between fire damage ticks (≈5 hp/s — fire is area denial; SUBMERSION is what kills)
   FIRE_WAIT_MAX: 560,       // a turn WAITS for burning ground to vanish; hard cap (frames)
 
   /* Tanks — small simple sprites */

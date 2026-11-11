@@ -8,14 +8,15 @@ const SE = (root.SE = root.SE || {});
 const U = SE.util;
 const CFG = SE.CONFIG;
 
-const AMMO_SHORT = { basic: 'BAS', cluster: 'CLU', roller: 'ROL', napalm: 'NAP', big: 'BIG', dirt: 'DIR' };
+const AMMO_SHORT = { basic: 'BAS', cluster: 'CLU', roller: 'ROL', napalm: 'NAP', big: 'BIG', dirt: 'DIR', leapfrog: 'LEP', funny: 'FUN' };
 
 class UI {
   constructor() {
     this.el = {};
     const ids = ['game', 'roundLabel', 'windArrow', 'windVal', 'muteBtn', 'newGameBtn',
       'playerCards', 'log', 'turnpanel', 'tpName', 'angleVal', 'powerVal', 'fuelVal',
-      'ammoRow', 'fireBtn', 'moveL', 'moveR', 'banner',
+      'ammoRow', 'ammoPick', 'ammoPickName', 'useShieldBtn', 'shieldBag',
+      'fireBtn', 'moveL', 'moveR', 'banner',
       'shopModal', 'shopTitle', 'shopMoney', 'shopItems', 'shopDone',
       'setupModal', 'seatList', 'seatCount', 'battlesInput', 'startBtn',
       'overModal', 'overTitle', 'overStats', 'againBtn', 'toSetupBtn'];
@@ -24,6 +25,7 @@ class UI {
     this.renderer = null;
     this.seatRows = [];
     this._cardTimer = 0;
+    this._ammoOpen = false;   // the ammo list is an OPEN-ON-DEMAND dropdown
     this._bindControls();   // bind input exactly once for the whole session
   }
 
@@ -158,6 +160,7 @@ class UI {
       self._updateCards();
     });
     game.on('turnStart', function (e) {
+      self._ammoOpen = false;            // a new turn: the ammo list starts closed
       const p = game.playerById(e.playerId);
       self._banner(p.name.toUpperCase(), p.color.main, p.human ? 'YOUR TURN' : 'thinking…');
       SE.sfx.chime();
@@ -201,6 +204,12 @@ class UI {
       self.renderer.addFloater(p.x, p.y - 38, txt, 'rgba(120,255,140,ALPHA)');
       self._updateCards();
     });
+    game.on('ammoUse', function (e) {
+      const p = game.playerById(e.playerId);
+      self._log(p.name + ' raises a shield from the bag', 'sys');
+      SE.sfx.buy();
+      self._updateCards();
+    });
     game.on('over', function (e) { self._showOver(e.winner, e.wins); });
 
     this._updateCards();
@@ -219,15 +228,24 @@ class UI {
     this.el.roundLabel.textContent = t;
   }
 
-  /* ---------------- HUD cards ---------------- */
+  /* ---------------- HUD cards ----------------
+     The card strip is SORTED to mirror the play order dealt with this
+     map — left-to-right on screen = the order the tanks actually shoot.
+     Dead seats keep their place (they show where they were in the order). */
   _updateCards() {
     if (!this.game) return;
+    const g = this.game;
     const wrap = this.el.playerCards;
     wrap.innerHTML = '';
-    for (const p of this.game.players) {
+    const ordered = (g.roundOrder && g.roundOrder.length === g.players.length)
+      ? g.roundOrder.map(function (id) { return g.players[id]; })
+      : g.players.slice();
+    let ord = 0;
+    for (const p of ordered) {
+      ord++;
       const c = document.createElement('div');
       c.className = 'card' + (p.alive ? '' : ' dead') +
-        (this.game.currentId === p.id ? ' active' : '');
+        (g.currentId === p.id ? ' active' : '');
       const ammos = [];
       for (const w of SE.shopWeapons()) {
         if (w.free) { ammos.push(AMMO_SHORT[w.id] + ' ∞'); continue; }
@@ -237,8 +255,10 @@ class UI {
       const extras = [];
       if (p.para > 0) extras.push('PFD ' + p.para);
       if (p.shield) extras.push('SHLD');
+      else if (p.ammo && p.ammo.shield > 0) extras.push('SHLD×' + p.ammo.shield + ' in bag');
       c.innerHTML =
-        '<div class="cHead"><span style="background:' + p.color.main + '"></span><b>' +
+        '<div class="cHead"><span class="cOrd" title="shot order">' + ord + '</span>' +
+        '<span class="sw" style="background:' + p.color.main + '"></span><b>' +
         this._esc(p.name) + '</b><span class="cMoney">$' + p.money + '</span></div>' +
         '<div class="bar"><i style="width:' + (p.hp / CFG.HP * 100) + '%;background:' +
         (p.hp > 50 ? '#5ad15a' : p.hp > 25 ? '#e8b62c' : '#e0453a') + '"></i></div>' +
@@ -277,7 +297,7 @@ class UI {
     this.el.fuelVal.textContent = p.fuel + 'px';
     const isHuman = p.human;
     tp.classList.toggle('cpuTurn', !isHuman);
-    // ammo buttons
+    // ammo list — an OPEN-ON-DEMAND dropdown, opened by the picker button
     const row = this.el.ammoRow;
     let wanted = '<button class="ammoBtn' + (p.selected === 'basic' ? ' on' : '') + '" data-wid="basic">Basic ∞</button>';
     for (const w of SE.shopWeapons()) {
@@ -287,6 +307,15 @@ class UI {
         '" data-wid="' + w.id + '"' + (n <= 0 ? ' disabled' : '') + '>' + w.name + ' ' + n + '</button>';
     }
     if (row.dataset.sig !== wanted) { row.dataset.sig = wanted; row.innerHTML = wanted; }
+    row.classList.toggle('hidden', !this._ammoOpen);
+    const selW = SE.weaponById(p.selected);
+    this.el.ammoPickName.textContent = (selW ? selW.name : 'Basic') +
+      (p.selected === 'basic' ? ' ∞' : ' ' + (p.ammo[p.selected] || 0));
+    // shield from the bag — usable right now, during your own move
+    const bag = (p.ammo && p.ammo.shield) || 0;
+    const sb = this.el.useShieldBtn;
+    sb.style.display = (isHuman && bag > 0 && !p.shield) ? '' : 'none';
+    this.el.shieldBag.textContent = bag;
   }
 
   _bindControls() {
@@ -304,13 +333,24 @@ class UI {
         if (p && p.human) self.game.aimTo(p.id, p.angle, p.power + parseFloat(t.dataset.power));
       } else if (t.dataset && t.dataset.wid && self.game) {
         const p = self.game.current();
-        if (p && p.human) { self.game.selectWeapon(p.id, t.dataset.wid); SE.sfx.click(); }
+        if (p && p.human) { self.game.selectWeapon(p.id, t.dataset.wid); SE.sfx.click(); self._ammoOpen = false; }
       }
     });
     this.el.fireBtn.addEventListener('click', function () {
       if (self.game && self.game.state === 'aim' && self.game.current() && self.game.current().human) {
         self.game.fire();
       }
+    });
+    /* ammo dropdown: the list opens only when you ask for it */
+    this.el.ammoPick.addEventListener('click', function () {
+      self._ammoOpen = !self._ammoOpen;
+      SE.sfx.click();
+      self._syncTurnPanel();
+    });
+    /* raise a shield from the bag — only meaningful on your own move */
+    this.el.useShieldBtn.addEventListener('click', function () {
+      const p = self.game && self.game.current();
+      if (p && p.human) self.game.useShield(p.id);
     });
     this.el.moveL.addEventListener('click', function () { if (self.game) self.game.moveTank(-1); });
     this.el.moveR.addEventListener('click', function () { if (self.game) self.game.moveTank(1); });

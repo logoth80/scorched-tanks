@@ -257,12 +257,68 @@ check('bomblets explode in SMALL blasts (area weapon again)',
     term > 0 && maxVy > 1 && maxVy <= term + 1e-9, 'maxVy=' + maxVy.toFixed(3) + ' cap=' + term);
 }
 
+/* LEAP FROG: explode → HOP forward → explode → hop again → explode. */
+{
+  let cur = SE.Weapons.create('leapfrog', 100, 100, 45, 8, 0);
+  const ids = [], blastXs = [];
+  let totalBlasts = 0, guard = 0;
+  while (cur && guard++ < 8) {
+    const rr = runProj(cur, 900);
+    ids.push(cur.def.id);
+    for (const e of rr.events) if (e.type === 'blast') { totalBlasts++; blastXs.push(e.x); }
+    cur = rr.spawned.length === 1 ? rr.spawned[0] : (rr.spawned.length > 1 ? null : null);
+    if (rr.spawned.length > 1) { check('leap frog hops spawn exactly ONE child per stage', false, 'got ' + rr.spawned.length); break; }
+  }
+  check('leap frog chains exactly 3 stages (3rd one has no further hop)',
+    ids.join(',') === 'leapfrog,leapfrog2,leapfrog3', ids.join(','));
+  check('leap frog makes EXACTLY 3 blasts — one per stage', totalBlasts === 3, 'blasts=' + totalBlasts);
+  check('every hop travels FORWARD or dies at the wall — never back, overall it marches downrange',
+    blastXs.length === 3 && blastXs[1] >= blastXs[0] && blastXs[2] >= blastXs[1] &&
+    blastXs[2] - blastXs[0] > 50,
+    JSON.stringify(blastXs.map(function (x) { return Math.round(x); })));
+}
+
+/* FUNNY BOMB: normal blast, then 3 firecrackers in random directions. */
+{
+  const rr = runProj(SE.Weapons.create('funny', 300, 100, 60, 8, 0), 900);
+  const launched = rr.spawned.map(function (k) { return { vx: k.vx, vy: k.vy }; });
+  check('funny bomb explodes on impact itself',
+    rr.events.some(function (e) { return e.type === 'blast'; }));
+  check('it fires EXACTLY 3 firecrackers, launched in different directions',
+    rr.spawned.length === 3 && rr.spawned.every(function (k) { return k.def.id === 'funnylet'; }) &&
+    new Set(rr.spawned.map(function (k) { return k.vx.toFixed(3); })).size === 3,
+    'kids=' + rr.spawned.length);
+  let pops = 0;
+  const kidX = [];
+  for (const kid of rr.spawned) {
+    const rk = runProj(kid, 900);
+    pops += rk.events.filter(function (e) { return e.type === 'blast'; }).length;
+    kidX.push(kid.x);
+  }
+  check('the firecrackers explode normally (one blast each)', pops === 3, 'pops=' + pops);
+  check('they scatter over an area (random directions land apart)',
+    Math.max.apply(null, kidX) - Math.min.apply(null, kidX) > 30,
+    JSON.stringify(kidX.map(function (x) { return Math.round(x); })));
+  // random but reproducible: same shot → same scatter; different shot → different
+  const r2 = runProj(SE.Weapons.create('funny', 300, 100, 60, 8, 0), 900);
+  const same = r2.spawned.length === 3 && r2.spawned.every(function (k, i) {
+    return Math.abs(k.vx - launched[i].vx) < 1e-12 && Math.abs(k.vy - launched[i].vy) < 1e-12;
+  });
+  const r3 = runProj(SE.Weapons.create('funny', 420, 100, 60, 8, 0), 900);
+  const differs = r3.spawned.length === 3 && r3.spawned.some(function (k, i) {
+    return Math.abs(k.vx - launched[i].vx) > 1e-9;
+  });
+  check('scatter is deterministic per impact but changes with the shot', same && differs,
+    'same=' + same + ' differs=' + differs);
+}
+
 // every explosive weapon clears its ENTIRE damage circle
 check('all explosive weapons dig with crater factor 1.0 (full circle)',
   SE.WEAPONS.every(function (w) {
     if (w.behavior === 'explode') return w.explosion.crater >= 0.999;
     if (w.behavior === 'roll') return w.roll.explode.crater >= 0.999;
     if (w.behavior === 'multiblast') return w.blasts.every(function (b) { return b.crater >= 0.999; });
+    if (w.behavior === 'hop' || w.behavior === 'funny') return w.explosion.crater >= 0.999;
     return true;   // thud / cluster parent / addground / fire: no digging blast of their own
   }));
 
@@ -376,11 +432,15 @@ function levelBasin(T, cx, halfW) {
   const bx = levelBasin(T, 500, 150);
   const v = g.players[1];
   v.x = bx; v.y = T.top(bx);
-  v.shield = true;                       // shielded: fire cannot hurt it at all
+  v.shield = true;                       // shield eats the FIRST hit — then it's gone
   T.addFire(bx, 60, 15, 300, 0);
-  for (let i = 0; i < 30; i++) g._tickFire();
-  check('a shield blocks fire damage (submersion included)',
-    v.alive && v.hp === CFG.HP, 'hp=' + v.hp);
+  g._tickFire();
+  check('a shield eats the first fire hit (submersion included) and shatters',
+    v.alive && v.shield === false && v.hp === CFG.HP,
+    'hp=' + v.hp + ' alive=' + v.alive + ' shield=' + v.shield);
+  g._tickFire();
+  check('the very next fire hit lands — a shield never eats two',
+    !v.alive, 'hp=' + v.hp + ' alive=' + v.alive);
 }
 
 /* the NEXT PLAYER waits until the fire has completely vanished.
@@ -392,7 +452,7 @@ function levelBasin(T, cx, halfW) {
   g.wind = 0;
   const p = g.players[0];
   const r0 = g.round;                                  // cycle we are inside
-  p.shield = true; g.players[1].shield = true;   // nobody dies during this test
+  p.hp = 1e9; g.players[1].hp = 1e9;                 // nobody dies during this test
   p.ammo = p.ammo || {}; p.ammo.napalm = 1;      // engine grants ammo via shop; grant here
   g.aimTo(p.id, 90, 40);
   g.selectWeapon(p.id, 'napalm');
@@ -468,10 +528,13 @@ function levelBasin(T, cx, halfW) {
   const g = new SE.Game({ seed: 8, seats: seatset(2, [0, 1]), battles: 1 });
   g.start();                               // shop phase, buyer 0
   const b0 = g.buy(0, 'shield');
+  const b0b = g.buy(0, 'shield');          // a SECOND one goes to the bag, not double-arming
   g.endCurrentBuyer();
   const b1 = g.buy(1, 'shield');
   g.endCurrentBuyer();                     // → a RANDOM seat's turn begins
-  check('shields bought at the pre-battle shop', b0 && b1);
+  check('shields bought at the pre-battle shop', b0 && b0b && b1);
+  check('beyond the first, bought shields wait in the bag',
+    g.players[0].ammo.shield === 1, 'bag=' + (g.players[0].ammo && g.players[0].ammo.shield));
   const cur = g.currentId, other = 1 - cur;
   check('the current player\'s own shield already faded at their turn start; the other keeps theirs',
     g.players[cur].shield === false && g.players[other].shield === true,
@@ -578,8 +641,80 @@ console.log('[names]');
     new Set(SE.NAMES).size === SE.NAMES.length && SE.NAMES.length >= 16);
 }
 
-console.log('[turn order — dealt per map, fixed during a fight]');
+/* shields eat EXACTLY ONE hit — then they are gone */
+console.log('[shield breaks on first damage]');
 {
+  const g = bareGame(88);
+  const v = g.players[1];
+  v.shield = true;
+  g.damage(v, 40, 0, 'test');
+  check('the first hit is fully eaten AND the shield shatters',
+    v.hp === CFG.HP && v.shield === false, 'hp=' + v.hp + ' shield=' + v.shield);
+  g.damage(v, 40, 0, 'test');
+  check('the next hit lands — a shield never eats two',
+    v.hp === CFG.HP - 40, 'hp=' + v.hp);
+}
+
+/* ground that covers a tank: it DIES down there — no teleport, no shield rescue */
+console.log('[tanks buried by the ground]');
+{
+  const g = bareGame(91);
+  let ns = 0; while (g.terrain.settleStep() && ns++ < 9000);
+  const p = g.players[0], q = g.players[1];
+  p.y = g.terrain.top(p.x); q.y = g.terrain.top(q.x);
+  const py0 = p.y, qy0 = q.y;
+  p.shield = true;
+  g.terrain.add(p.x, py0, 30, 20);          // a mound grows right OVER this tank
+  g.terrain.add(q.x, qy0 + 19, 25, 0);      // ground rises only 6 px UNDER that one
+  g._updateTanks();
+  check('a tank the terrain covers DIES in place — it is not teleported up',
+    !p.alive && p.y === py0, 'alive=' + p.alive + ' y=' + p.y + ' was ' + py0);
+  check('burial beats a shield — it is useless underground',
+    p.shield === false, 'shield=' + p.shield);
+  check('ground rising only UNDER a tank (stays below its head) still carries it up',
+    q.alive && q.y === qy0 - 6, 'q.y=' + q.y + ' was ' + qy0);
+}
+
+/* destroyed tanks EXPLODE — the first death effect, leaving a real small crater */
+console.log('[death effect: explosion]');
+{
+  const g = bareGame(61);
+  let ns = 0; while (g.terrain.settleStep() && ns++ < 9000);
+  const kinds = [];
+  g.on('fx', function (e) { kinds.push(e.kind); });
+  const v = g.players[1];
+  const mass0 = g.terrain.countSolid();
+  g.damage(v, CFG.HP, 0, 'test');
+  check('a destroyed tank emits a death-explosion effect',
+    !v.alive && kinds.indexOf('deathExplosion') >= 0, 'kinds=' + kinds.join(','));
+  const removed = mass0 - g.terrain.countSolid();
+  check('its own blast leaves a small crater in the ground',
+    removed >= 20, 'removed px=' + removed);
+  check('the death crater stays small (tuned by DEATH_BLAST_R)',
+    removed <= 2500, 'removed px=' + removed);
+}
+
+/* extra shields sit in the bag and are raised DURING your move */
+console.log('[shields from the bag during your turn]');
+{
+  const g = bareGame(23);
+  const p = g.players[0];
+  p.ammo = p.ammo || {};
+  check('nothing to raise with an empty bag',
+    g.useShield(p.id) === false && p.shield === false);
+  p.ammo.shield = 2;
+  check('raise a stored shield during your own move',
+    g.useShield(p.id) === true && p.shield === true && p.ammo.shield === 1);
+  check('while already shielded, a second use is refused (bag untouched)',
+    g.useShield(p.id) === false && p.ammo.shield === 1);
+  check('cannot use the bag during another seat\'s turn',
+    g.useShield(1 - p.id) === false && g.players[1 - p.id].shield === false);
+  g.startTurn(p.id);                        // your NEXT turn begins
+  check('the raised shield fades at your next turn start — the bag keeps the rest',
+    p.shield === false && p.ammo.shield === 1);
+}
+
+console.log('[turn order — dealt per map, fixed during a fight]');{
   const firsts = {};
   for (let s = 1; s <= 8; s++) {
     const g = new SE.Game({ seed: s * 111, seats: seatset(4), battles: 1 });
@@ -601,6 +736,8 @@ console.log('[turn order — dealt per map, fixed during a fight]');
     battleOrder.slice().sort().join(',') === '0,1,2,3', battleOrder.join(','));
   const seen = new Set([battleOrder.join(',')]);
   const starters = new Set([g.currentId]);
+  // this test is ABOUT ORDER — make forced storms harmless to it
+  for (const p of g.players) p.hp = 999999;
   for (let r = 0; r < 10; r++) { g._beginRound(); seen.add(g.roundOrder.join(',')); starters.add(g.currentId); }
   check('during a fight the order NEVER changes — every round replays the same sequence',
     seen.size === 1 && starters.size === 1 && g.currentId === battleOrder[0],

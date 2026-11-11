@@ -100,6 +100,10 @@ SE.CONFIG = {
   PARA_VY: 1.6,             // terminal speed while parachuting
   PARA_RESCUE: 0.15,        // parachuted landings keep only 15% of fall damage
 
+  /* Death effect: a destroyed tank EXPLODES — its own blast leaves this
+     small crater in the ground (particles + dig; damage is already done). */
+  DEATH_BLAST_R: 16,
+
   /* A match = best-of series of battles. The shop runs ONLY before the
      first battle and between battles — never mid-battle. Between
      battles the map is brand new and tanks are placed randomly again
@@ -155,10 +159,16 @@ SE.TANK_VARIANTS = ['compact', 'stalker', 'hauler'];
  * AMMUNITION TABLE — tune freely, add more.
  *  price / count : shop pack (buying gives `count` shots for `price` $)
  *  hidden:true   : internal child projectile, not sold in the shop
- *  behavior      : 'explode' | 'thud' | 'cluster' | 'roll' | 'multiblast' | 'addground' | 'fire'
+ *  behavior      : 'explode' | 'thud' | 'cluster' | 'roll' | 'multiblast' |
+ *                  'addground' | 'fire' | 'hop' | 'funny'
  *  explosion     : radius = damage circle, crater = crater radius multiplier
  *                  (crater sizes stay independent of radius — scale freely)
  *  fire          : liquid-fire pour for behavior 'fire' (radius/depth px, life frames)
+ *  hop           : behavior 'hop' — explode on impact, then spawn `child`
+ *                  hopping FORWARD (vx = hop speed in travel direction, vy =
+ *                  launch hop). Chain children to control how many hops.
+ *  funny         : behavior 'funny' — normal blast, then `count` children
+ *                  fired in RANDOM directions (angles deg, speeds px/frame)
  *  launch        : per-weapon multipliers on shared ballistics; optional
  *                  `terminal` caps how fast the projectile can fall (px/frame)
  * ===================================================================== */
@@ -234,6 +244,49 @@ SE.WEAPONS = [
     add: { radius: 40, raise: 6 },
     explosion: { radius: 39, damage: 25, crater: 0 },
   },
+  {
+    id: 'leapfrog', name: 'Leap Frog', price: 500, count: 2,
+    desc: 'Explodes on impact, then HOPS forward and explodes again — and hops once more. Three blasts chasing downrange.',
+    color: '#8ee06e', trail: 'rgba(142,224,110,0.5)', size: 2.8,
+    launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
+    behavior: 'hop',
+    explosion: { radius: 44, damage: 75, crater: 1.0 },
+    hop: { child: 'leapfrog2', vx: 2.4, vy: 4.2 },
+  },
+  {
+    id: 'leapfrog2', name: 'Leap Frog (2nd hop)', hidden: true,
+    desc: 'The second hop of a Leap Frog.',
+    color: '#a8e88a', trail: 'rgba(168,232,138,0.45)', size: 2.5,
+    launch: { speedScale: 1, gravityScale: 1.0, windScale: 1.0, drag: 0 },
+    behavior: 'hop',
+    explosion: { radius: 40, damage: 70, crater: 1.0 },
+    hop: { child: 'leapfrog3', vx: 2.0, vy: 3.4 },
+  },
+  {
+    id: 'leapfrog3', name: 'Leap Frog (final splash)', hidden: true,
+    desc: 'The last hop of a Leap Frog — lands with a bang.',
+    color: '#c2efac', trail: 'rgba(194,239,172,0.4)', size: 2.2,
+    launch: { speedScale: 1, gravityScale: 1.0, windScale: 1.0, drag: 0 },
+    behavior: 'explode',
+    explosion: { radius: 36, damage: 65, crater: 1.0 },
+  },
+  {
+    id: 'funny', name: 'Funny Bomb', price: 450, count: 2,
+    desc: 'Explodes on impact — then pops THREE little firecrackers in RANDOM directions. Where they land is anybody\'s guess.',
+    color: '#ff8ad4', trail: 'rgba(255,138,212,0.55)', size: 3,
+    launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.0, drag: 0 },
+    behavior: 'funny',
+    explosion: { radius: 52, damage: 85, crater: 1.0 },
+    funny: { count: 3, child: 'funnylet', angleMin: 25, angleMax: 155, speedMin: 3.2, speedMax: 7.4 },
+  },
+  {
+    id: 'funnylet', name: 'Firecracker', hidden: true,
+    desc: 'One of the Funny Bomb\'s random little pops.',
+    color: '#ffc2e6', trail: 'rgba(255,194,230,0.45)', size: 1.8,
+    launch: { speedScale: 1, gravityScale: 1.0, windScale: 1.2, drag: 0.006 },
+    behavior: 'explode',
+    explosion: { radius: 24, damage: 35, crater: 1.0 },
+  },
 ];
 
 /* ---------- consumable items ---------- */
@@ -241,7 +294,7 @@ SE.ITEMS = [
   { id: 'parachute', name: 'Parachute', price: 120,
     desc: 'Auto-opens on long falls and softens the landing (falling still hurts).' },
   { id: 'shield', name: 'Shield', price: 250,
-    desc: 'Absorbs ALL damage from everyone else until your next turn begins.' },
+    desc: 'Eats the FIRST hit aimed at you, then it\'s gone (it also fades when your own next turn begins). Spare shields stay in your bag — raise one during your move.' },
 ];
 
 /* ---------- lookup helper ---------- */

@@ -10,6 +10,9 @@
  *   'multiblast'  fly → 3 staggered blasts (Big Bomb)
  *   'addground'   fly → builds a mound of dirt instead of digging (Dirt Bomb)
  *   'fire'        fly → pour liquid fire (flows downhill, burns for a while)
+ *   'hop'         fly → blast → spawn child HOPPING forward → blast → … (Leap Frog)
+ *   'funny'       fly → blast → 3 children in random directions that just
+ *                 explode normally (Funny Bomb)
  *
  * step(p, ctx, out) pushes events into `out` which the game applies:
  *   {type:'blast'|'add'|'fire'|'direct'|'fx'|'despawn'}
@@ -136,11 +139,48 @@ const Weapons = {
       out.push({ type: 'fx', kind: 'fire', x: p.x, y: p.y });
       return;
     }
+    if (b === 'hop') {   // Leap Frog: blast here, then hop FORWARD and blast again
+      const ex = def.explosion;
+      out.push({ type: 'blast', x: p.x, y: p.y, owner: p.owner,
+        radius: ex.radius, damage: ex.damage, crater: ex.crater,
+        craterY: ex.craterY, burn: ex.burn || 0 });
+      if (def.hop && def.hop.child) {
+        const dir = p.vx < 0 ? -1 : 1;    // keeps travelling its direction
+        // start just above the ACTUAL surface, so the hop never drowns in the slope
+        const sy = Math.min(p.y - 6, ctx.terrain.top(p.x) - 4);
+        ctx.spawn(def.hop.child, p.x, sy, dir * def.hop.vx, -def.hop.vy, p.owner);
+        out.push({ type: 'fx', kind: 'hop', x: p.x, y: p.y });
+      }
+      return;
+    }
+    if (b === 'funny') { // Funny Bomb: normal blast + 3 firecrackers in RANDOM directions
+      const ex = def.explosion, f = def.funny;
+      out.push({ type: 'blast', x: p.x, y: p.y, owner: p.owner,
+        radius: ex.radius, damage: ex.damage, crater: ex.crater,
+        craterY: ex.craterY, burn: ex.burn || 0 });
+      const rnd = (ctx && ctx.rand) || this._seedRng(p);
+      const sy = Math.min(p.y - 6, ctx.terrain.top(p.x) - 4);   // above the surface
+      for (let i = 0; i < f.count; i++) {
+        const a = (f.angleMin + rnd() * (f.angleMax - f.angleMin)) * DEG;
+        const s = f.speedMin + rnd() * (f.speedMax - f.speedMin);
+        ctx.spawn(f.child, p.x, sy, Math.cos(a) * s, -Math.sin(a) * s, p.owner);
+      }
+      out.push({ type: 'fx', kind: 'burst', x: p.x, y: p.y });
+      return;
+    }
     // default: plain explosion
     const ex = def.explosion;
     out.push({ type: 'blast', x: p.x, y: p.y, owner: p.owner,
       radius: ex.radius, damage: ex.damage, crater: ex.crater,
       craterY: ex.craterY, burn: ex.burn || 0 });
+  },
+
+  /* deterministic RNG fallback for scatter weapons (tests / bare ctx) */
+  _seedRng(p) {
+    let s = (((p.x | 0) * 73856093) ^ ((p.y | 0) * 19349663) ^ ((p.owner | 0) * 83492791)) >>> 0;
+    const f = SE.util && SE.util.mulberry32;
+    if (f) return f(s);
+    return function () { s = (s * 1103515245 + 12345) >>> 0; return s / 4294967296; };
   },
 
   /* ---------------- cluster split: a 3-bomb RANGE LADDER -----------------

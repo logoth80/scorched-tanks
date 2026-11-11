@@ -40,13 +40,18 @@ Deploy from a branch → default branch / root** — it will serve `index.html` 
      dirt mounds built),
   3. **the ground falls**: soil collapses into every hole and slumps down over-steep
      slopes until stable (mass is exactly conserved),
-  4. **tanks fall** if their ground went away, and **fall damage** is applied,
+  4. **tanks fall** if their ground went away, and **fall damage** is applied —
+      and if the moved ground ends up **covering a tank's own column above its
+      head, the tank dies right there buried** (it is *not* teleported up onto
+      the new mound; ground rising only up to under its head carries it up, and
+      side mounds never touch it),
   5. **burning ground keeps burning**: if any liquid fire is still alive, the game
      *waits right there* — the next player only starts **once the fire has
      vanished** (hard-capped by `FIRE_WAIT_MAX` so it can never hang forever).
 - Direct hit / **tank fully inside a blast circle = 100 damage = always lethal**
   (measured to the tank's farthest corner). Blast damage falls off only for tanks
-  *partially* inside the shown circle. Shields block either case.
+  *partially* inside the shown circle. A shield can eat either case — but only
+  once (see Shields below).
 - **Every tank is paid at the end of each battle: $700 plus $100 for every enemy it
   outlasted** (survivors outlast all dead tanks; tanks that die in the same exchange
   tie). Kills pay an extra bonus during battle. No separate "win bonus" — placement
@@ -63,15 +68,22 @@ Deploy from a branch → default branch / root** — it will serve `index.html` 
 - **Fuel is total, never refilled: 5 tank-lengths per battle**, and tanks never climb
   steep slopes — repositioning is a rare, precious action.
 - **Parachutes** auto-open on long falls (falling still hurts without one; with one,
-  fall damage is cut hard). **Shields** absorb all damage from everyone else — until
-  your own next turn begins.
+  fall damage is cut hard). **Shields eat exactly ONE hit — any hit** (bullet, fire,
+  even being hit at all): the circle flashes on, the hit is swallowed whole, and the
+  shield instantly shatters into shards. Extra shields stay in your **bag**: when one
+  is in there, a **🛡 Raise shield** button appears during your own move. A shield
+  is useless underground — a buried tank never gets the "first hit" favor.
+- A destroyed tank **goes out with its own explosion** — it really digs a small
+  crater (`DEATH_BLAST_R`) and the surrounding ground collapses into it. Today every
+  death uses the same blast; `_deathFx()` in `js/game.js` is the hook where
+  per-cause death styles will live.
 
 ## Ammunition
 
 All ammo lives in one table in [`js/config.js`](js/config.js) — copy an entry, change
 numbers, and it shows up in the shop and the AI's decisions automatically. Behaviors
 are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cluster`,
-`roll`, `multiblast`, `addground`, `fire`). Each weapon's `launch` block can tune
+`roll`, `multiblast`, `addground`, `fire`, `hop`, `funny`). Each weapon's `launch` block can tune
 `speedScale / gravityScale / windScale / drag` and a per-shot **fall-speed cap**
 (`terminal` — small values make ordnance *drift*). Current lineup:
 
@@ -83,13 +95,16 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 | Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; see below |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
+| Leap Frog | **explodes on impact, then HOPS forward and explodes again — three times over**: the blast spawns a hidden frog that jumps downrange, and it spawns one more (a chain of plain table entries, fully tunable) |
+| Funny Bomb | **explodes on impact, then pops 3 firecrackers in random directions** — each a small normal blast; the scatter draws from the match's own seeded RNG, so a replay of the same shot scatters identically |
 
 **Liquid fire** is a per-column fluid (`js/terrain.js`: `fire[]` + flow/burn rules).
 It behaves like heavy liquid fuel: it **spreads sideways only slowly** (gentle
 surface leveling), but **slides fast down any slope** and fills valleys and low
 ground; it burns for `fire.life` frames, then shrinks away. Touching it hurts over
 time (`FIRE_DOT` every `FIRE_TICK` frames); a tank **fully submerged** in the fluid
-(depth ≥ tank height) dies on the spot — unless shielded. The fire's owner gets
+(depth ≥ tank height) dies on the spot — a shield eats that hit once, the next one
+does not. The fire's owner gets
 credit for the kill, and the kill's battle-death order feeds the outlast payout.
 And the turn **does not pass on while the ground is burning**: resolution simply
 waits until the fire has vanished (capped by `FIRE_WAIT_MAX`). All knobs
@@ -126,7 +141,12 @@ Example of adding your own in seconds:
 ## Controls
 
 - **Drag on the field** to aim & fire, or: **←/→** barrel angle (← aims left),
-  **↑/↓** power (1–200), **Space** fire, **1–6** select ammo, **A/D** drive.
+  **↑/↓** power (1–200), **Space** fire, **number keys** pick ammo (1 = Basic, then
+  shop order), **A/D** drive.
+- **Ammo is an openable list**: the turn panel shows a compact **Ammo ▾** button
+  naming your current shell; it opens the picker only when you ask, and closes
+  after you choose. When a spare shield sits in your bag, a **🛡 Raise shield**
+  button appears during your own move.
 - Your aim (angle/power) and chosen ammo **carry over to your next turn** —
   correct like a real artillery spotter instead of re-dialing from scratch.
 - Setup screen picks players (HUMAN/CPU mix), seat names, and battle count —
@@ -134,7 +154,10 @@ Example of adding your own in seconds:
   your usual table already dialed in.
 - The player strip (health / fuel / money / ammo for everyone) lives along the
   **bottom of the screen** so it never covers the leftmost tank; the event log
-  sits above it on the right.
+  sits above it on the right. **The strip is sorted to mirror the shot order** —
+  left-to-right on screen is literally the order the tanks shoot on this map
+  (each card carries its position number), and it re-sorts whenever a new map
+  re-deals the order.
 
 ## The CPU (and how to make it nicer or meaner)
 
@@ -160,10 +183,15 @@ The engine is DOM-free, so the whole game can be simulated headless:
 
 ```sh
 node test/sim.js      # terrain invariants, open map borders, every weapon incl.
-                      # liquid-fire flow/kill rules, power cap, strict turn pipeline,
+                      # liquid-fire flow/kill rules, leap frog & funny bomb chains,
+                      # one-hit shields, burial crush, death-explosion craters,
+                      # power cap, strict turn pipeline,
                       # nicknames, per-map-dealt (fight-fixed) turn order, random spawn
                       # slots, multi-battle match flow, 5 seeded full matches + an 8P match
 node test/stress.js   # 40 seeded matches: all must terminate
+node test/ui_dom.js   # DOM-free smoke of the UI layer via a tiny DOM stub:
+                      # shot-order-sorted card strip (re-sorts on new maps),
+                      # openable ammo dropdown, raise-shield button rules
 ```
 
 ## Files

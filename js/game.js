@@ -14,7 +14,8 @@
  *      shown GROWING from each impact — no damage yet)
  *   2. once all circles finish growing: damage to players (a tank FULLY
  *      inside the circle takes the weapon's FULL hit points; a tank
- *      shielded this turn takes none) + the circle's ground is destroyed
+ *      carrying a shield eats the FIRST hit and loses the shield) + the
+ *      circle's ground is destroyed
  *   3. the ground falls (settling runs to completion — visibly, slowly)
  *   4. tanks fall if their ground went, then fall damage is applied
  *   5. while liquid fire still burns the game WAITS — the next player
@@ -278,7 +279,12 @@ class Game {
       p.ammo[entryId] = (p.ammo[entryId] || 0) + entry.count;
     } else {
       if (entryId === 'parachute') p.para = Math.min(3, p.para + 1);
-      if (entryId === 'shield') p.shield = true;
+      if (entryId === 'shield') {
+        // the first shield bought goes up at once; ANY FURTHER ones sit in
+        // the bag — useShield() fires them during your own move
+        p.ammo.shield = (p.ammo.shield || 0) + 1;
+        if (!p.shield) this._useStoredShield(p);
+      }
     }
     this.emit('buy', { playerId: pid, id: entryId, kind: soldWeapon ? 'weapon' : 'item' });
     return true;
@@ -287,6 +293,24 @@ class Game {
   addMoney(p, amt, reason) {
     p.money += amt;
     this.emit('money', { playerId: p.id, amount: amt, reason: reason });
+  }
+
+  /* ---------- shields from the bag ---------- */
+  _useStoredShield(p) {
+    if (!(p.ammo && p.ammo.shield > 0) || p.shield) return false;
+    p.ammo.shield--;
+    p.shield = true;
+    this.emit('fx', { kind: 'shieldOn', x: p.x, y: p.y - CFG.TANK_H / 2, owner: p.id });
+    return true;
+  }
+
+  /* use a stored shield during YOUR OWN move (aim phase) */
+  useShield(id) {
+    const p = this.players[id];
+    if (!p || !p.alive || this.state !== 'aim' || this.currentId !== id) return false;
+    if (!this._useStoredShield(p)) return false;
+    this.emit('ammoUse', { playerId: id, id: 'shield' });
+    return true;
   }
 
   /* ---------- turns ---------- */
@@ -618,7 +642,22 @@ class Game {
         }
       } else {
         if (gy > p.y + 1) { p.falling = true; p.vy = 0; p.fallStartY = p.y; }
-        else if (gy < p.y) p.y = gy;                 // fresh ground lifts you up
+        else {
+          // ground rose IN THE TANK'S OWN COLUMN (dirt bombs etc.). A tank the
+          // terrain fully COVERS does not teleport up onto it — the earth
+          // buries it, and a shield buys you nothing down there. Ground that
+          // merely rises under it (not over its head) carries it up. A mound
+          // beside the tank never moves it — support loss is handled above.
+          const tc = this.terrain.top(p.x);
+          if (tc < p.y) {
+            if (tc <= p.y - CFG.TANK_H + 2) {
+              p.shield = false;
+              this.damage(p, CFG.HP, null, 'buried');
+              continue;
+            }
+            p.y = tc;
+          }
+        }
       }
     }
   }
@@ -628,6 +667,7 @@ class Game {
     const newProjs = [];
     const ctx = {
       terrain: this.terrain, tanks: this.players, wind: this.wind, W: CFG.W,
+      rand: this.rand,   // weapons that scatter (Funny Bomb) draw from the match RNG
       spawn: function (defId, x, y, vx, vy, owner) {
         newProjs.push(SE.Weapons.createVelocity(defId, x, y, vx, vy, owner));
       },
@@ -717,8 +757,11 @@ class Game {
   /* ---------- damage / kills ---------- */
   damage(t, amount, owner, cause) {
     if (!t.alive) return;
-    if (t.shield) {
-      this.emit('fx', { kind: 'shieldHit', x: t.x, y: t.y - CFG.TANK_H / 2 });
+    if (t.shield && cause !== 'buried') {
+      /* a shield eats EXACTLY ONE HIT and is gone — it never eats the next
+         one either. (It also fades when your own next turn begins.) */
+      t.shield = false;
+      this.emit('fx', { kind: 'shieldBreak', x: t.x, y: t.y - CFG.TANK_H / 2, owner: t.id });
       return;
     }
     t.hp -= amount;
@@ -732,6 +775,30 @@ class Game {
         this.addMoney(this.players[owner], CFG.KILL_PAY, 'kill');
       }
       this.emit('kill', { victimId: t.id, killerId: owner != null ? owner : null, cause: cause });
+      this._deathFx(t);
+    }
+  }
+
+  /* ---------- death effects (pluggable — "explosion" is the first kind;
+     later: per-weapon death styles can pick by cause) ---------- */
+  _deathFx(t) {
+    const cy = t.y - CFG.TANK_H / 2;
+    this.emit('fx', { kind: 'deathExplosion', x: t.x, y: cy, owner: t.id });
+    if (!(CFG.DEATH_BLAST_R > 0)) return;
+    // the wreck's own blast leaves a real (small) dent in the ground
+    this.terrain.dig(t.x, cy, CFG.DEATH_BLAST_R, 1);
+    let n = 0;
+    while (n < 200 && this.terrain.settleStep()) n++;
+    // tanks whose support the collapse just took away settle NOW, unless the
+    // resolve pipeline is mid-phase (its own tanks phase will handle them)
+    const ph = this.resPhase;
+    if (ph === 'blasts' || ph === 'settle' || ph === 'tanks') return;
+    let guard = 0;
+    for (;;) {
+      this._updateTanks();
+      let any = false;
+      for (const p of this.players) if (p.alive && p.falling) { any = true; break; }
+      if (!any || ++guard > 900) break;
     }
   }
 

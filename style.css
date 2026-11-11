@@ -44,7 +44,11 @@ body { display: flex; align-items: center; justify-content: center; }
 .card.dead { opacity: .35; filter: grayscale(1); }
 .cHead { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .cHead b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
-.cHead span:first-child, .oRow span { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.cHead span.sw, .oRow span { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+/* the little number = this seat's position in the dealt shot order
+   (must stay AFTER the swatch rule above — same specificity, later wins) */
+.cHead span.cOrd { width: auto; height: auto; border-radius: 0; display: inline;
+  color: #66788d; font: 700 10px monospace; flex: none; }
 .cMoney { margin-left: auto; color: #8ee08e; font-weight: 700; flex: none; }
 .bar { height: 5px; background: #1a222e; border-radius: 3px; margin-top: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; }
@@ -82,6 +86,13 @@ body { display: flex; align-items: center; justify-content: center; }
   border-radius: 5px; padding: 3px 8px; font-size: 11px; }
 .ammoBtn.on { background: #2f5d8a; border-color: #4d84b8; }
 .ammoBtn.off { opacity: .35; }
+/* the ammo list is openable: the picker shows the current selection */
+#ammoPick { min-width: 170px; text-align: left; }
+#ammoPick b { color: #ffe27a; }
+/* raising a shield from the bag during your move */
+.itemBtn { background: #16333f; border-color: #2e6f8f; }
+.itemBtn:hover { background: #1d4658; }
+.itemBtn b { color: #9fd0ff; }
 #fireBtn { background: #7e2f22; border-color: #b04a35; font-weight: 700; font-size: 14px; padding: 6px 14px; }
 #fireBtn:hover { background: #a03c2b; }
 #ctrlHelp { color: #66788d; font-size: 10.5px; }

@@ -136,7 +136,7 @@ class Renderer {
         this.particles.push({ k: 'spark', x: e.x, y: e.y, ttl: 12, t: 0 });
         this.shake = Math.max(this.shake, 6);
         break;
-      case 'thud': case 'landing': case 'impact':
+      case 'thud': case 'landing': case 'impact': case 'hop':
         for (let i = 0; i < 8; i++) {
           this.particles.push({ k: 'dust', x: e.x, y: e.y,
             vx: (Math.random() - 0.5) * 2, vy: -Math.random() * 1.2, ttl: 18 + Math.random() * 10, t: 0 });
@@ -151,6 +151,42 @@ class Renderer {
       case 'shieldHit':
         this.particles.push({ k: 'shield', x: e.x, y: e.y, ttl: 14, t: 0 });
         break;
+      case 'shieldOn':   // arming a shield from the bag: the dome implodes in
+        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 28, r1: 8, ttl: 10, t: 0 });
+        this.particles.push({ k: 'shield', x: e.x, y: e.y, ttl: 12, t: 0 });
+        break;
+      case 'shieldBreak': {   // one hit eaten — the dome SHATTERS into shards
+        this.particles.push({ k: 'shield', x: e.x, y: e.y, ttl: 8, t: 0 });
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2, sp = 1.4 + Math.random() * 2.6;
+          this.particles.push({ k: 'shard', x: e.x, y: e.y,
+            vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6,
+            ttl: 14 + Math.random() * 10, t: 0 });
+        }
+        break;
+      }
+      case 'deathExplosion': { // destroyed tanks blow up (first death effect)
+        this.shake = Math.max(this.shake, 9);
+        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 3, r1: 52, ttl: 13, t: 0 });
+        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 2, r1: 28, ttl: 8, t: 0 });
+        for (let i = 0; i < 7; i++) {
+          this.particles.push({ k: 'drop', x: e.x + (Math.random() - 0.5) * 10, y: e.y,
+            vx: (Math.random() - 0.5) * 3.4, vy: -1.5 - Math.random() * 2.5,
+            ttl: 20 + Math.random() * 14, t: 0 });
+        }
+        for (let i = 0; i < 12; i++) {
+          this.particles.push({ k: 'dust', x: e.x, y: e.y,
+            vx: (Math.random() - 0.5) * 3, vy: -Math.random() * 2.2,
+            ttl: 22 + Math.random() * 16, t: 0 });
+        }
+        for (let i = 0; i < 10; i++) {   // its own scrap flying apart
+          const a = Math.random() * Math.PI * 2, sp = 1.2 + Math.random() * 3.8;
+          this.particles.push({ k: 'shard', x: e.x, y: e.y,
+            vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1,
+            ttl: 26 + Math.random() * 16, t: 0, c: '#3a3f49' });
+        }
+        break;
+      }
       case 'parachute':
         break;
     }
@@ -461,6 +497,19 @@ class Renderer {
             ctx.lineTo(p.x + Math.cos(a) * r1, p.y + Math.sin(a) * r1);
             ctx.stroke();
           }
+          break;
+        }
+        case 'shard': {   // shield fragments / tank scrap — flung, gravity, spin
+          p.x += p.vx; p.y += p.vy; p.vy += 0.22; p.vx *= 0.99;
+          ctx.strokeStyle = p.c || ('rgba(160,215,255,' + (1 - f) + ')');
+          ctx.globalAlpha = p.c ? (1 - f) : 1;
+          ctx.lineWidth = 1.4;
+          const a = (p.ttl - p.t) * 0.35;
+          ctx.beginPath();
+          ctx.moveTo(p.x - Math.cos(a) * 2.5, p.y - Math.sin(a) * 2.5);
+          ctx.lineTo(p.x + Math.cos(a) * 2.5, p.y + Math.sin(a) * 2.5);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
           break;
         }
         case 'shield': {

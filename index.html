@@ -38,10 +38,14 @@
         <span class="lbl">Move (fuel)</span>
         <button id="moveL">◀◀</button><span id="fuelVal" class="val">100px</span><button id="moveR">▶▶</button>
       </div>
-      <div id="ammoRow"></div>
+      <div class="tpRow">
+        <button id="ammoPick">Ammo: <b id="ammoPickName">Basic</b> ▾</button>
+        <button id="useShieldBtn" class="itemBtn" style="display:none">🛡 Raise shield ×<b id="shieldBag">0</b></button>
+      </div>
+      <div id="ammoRow" class="hidden"></div>
       <div class="tpRow">
         <button id="fireBtn">🔥 FIRE (Space)</button>
-        <span id="ctrlHelp">Drag on the field to aim &amp; fire · ←→ angle · ↑↓ power · A/D drive · 1-6 select ammo</span>
+        <span id="ctrlHelp">Drag on the field to aim &amp; fire · ←→ angle · ↑↓ power · A/D drive · numbers pick ammo</span>
       </div>
     </div>
 

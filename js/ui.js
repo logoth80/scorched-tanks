@@ -13,7 +13,8 @@ const AMMO_SHORT = { basic: 'BAS', cluster: 'CLU', roller: 'ROL', napalm: 'NAP',
 class UI {
   constructor() {
     this.el = {};
-    const ids = ['game', 'roundLabel', 'windArrow', 'windVal', 'muteBtn', 'newGameBtn',
+    const ids = ['game', 'roundLabel', 'windArrow', 'windVal', 'flagMount', 'flagCloth',
+      'muteBtn', 'newGameBtn',
       'playerCards', 'log', 'turnpanel', 'tpName', 'angleVal', 'powerVal', 'fuelVal',
       'ammoRow', 'ammoPick', 'ammoPickName', 'useShieldBtn', 'shieldBag',
       'fireBtn', 'moveL', 'moveR', 'banner',
@@ -148,6 +149,7 @@ class UI {
     game.on('wind', function (e) {
       self.el.windArrow.textContent = e.wind === 0 ? '·' : (e.wind > 0 ? '→' : '←');
       self.el.windVal.textContent = Math.abs(e.wind).toFixed(1);
+      self._windFlag(e.wind);
     });
     game.on('shopBuyer', function (e) { self._openShop(e.playerId); });
     game.on('buy', function (e) {
@@ -464,6 +466,21 @@ class UI {
   }
 
   /* ---------------- shop ---------------- */
+  /* HUD wind flag — pure DOM in the topbar, so terrain and craters can
+     never touch it. Length + flutter speed read the strength, mirroring
+     reads the direction, and dead calm hangs the cloth down the pole. */
+  _windFlag(wind) {
+    const mount = this.el.flagMount, cloth = this.el.flagCloth;
+    if (!mount || !cloth) return;
+    const max = ((SE.CONFIG && SE.CONFIG.WIND_MAX) || 12);
+    const mag = Math.min(1, Math.abs(wind) / max);
+    const calm = mag < 0.04;
+    mount.style.transform =
+      (wind < 0 ? 'scaleX(-1) ' : '') + (calm ? 'rotate(84deg)' : 'rotate(0deg)');
+    cloth.style.width = (calm ? 6 : Math.round(7 + mag * 17)) + 'px';
+    cloth.style.animationDuration = (1.6 - mag * 1.25).toFixed(2) + 's';
+  }
+
   _openShop(playerId) {
     const p = this.game.playerById(playerId);
     if (!p.human) {

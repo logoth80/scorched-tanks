@@ -17,7 +17,10 @@
   <div id="hud">
     <div id="topbar">
       <span id="roundLabel">Battle —</span>
-      <span id="windBox">Wind <b id="windArrow">·</b> <span id="windVal">0.0</span></span>
+      <span id="windBox" title="Wind — re-rolled every turn; watch the flag">
+        <span id="windGauge" aria-hidden="true"><i id="flagPole"></i><i id="flagMount"><i id="flagCloth"></i></i></span>
+        Wind <b id="windArrow">·</b> <span id="windVal">0.0</span>
+      </span>
       <span class="spacer"></span>
       <button id="muteBtn">🔊</button>
       <button id="newGameBtn">New game</button>

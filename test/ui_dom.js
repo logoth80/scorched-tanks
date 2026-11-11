@@ -143,5 +143,25 @@ p.ammo.shield = 1;
 check('and the engine action the button calls works from the aim phase',
   g.useShield(p.id) === true && p.shield === true && p.ammo.shield === 0);
 
+/* the wind flag is a pure DOM widget — terrain can never cover it,
+   and it must read strength AND direction from the wind event */
+g.emit('wind', { wind: -9 });
+check('strong wind: flag stretches wide and mirrors to point left',
+  parseInt(ui.el.flagCloth.style.width, 10) >= 18 && ui.el.flagMount.style.transform.indexOf('scaleX(-1)') >= 0,
+  'w=' + ui.el.flagCloth.style.width + ' t=' + ui.el.flagMount.style.transform);
+check('strong wind flutters fast',
+  parseFloat(ui.el.flagCloth.style.animationDuration) < 0.8,
+  'dur=' + ui.el.flagCloth.style.animationDuration);
+g.emit('wind', { wind: 10 });
+check('right wind: no mirroring, cloth longer than calm',
+  ui.el.flagMount.style.transform.indexOf('scaleX') < 0 &&
+  parseInt(ui.el.flagCloth.style.width, 10) >= 20,
+  'w=' + ui.el.flagCloth.style.width + ' t=' + ui.el.flagMount.style.transform);
+g.emit('wind', { wind: 0 });
+check('dead calm: the cloth hangs down the pole',
+  ui.el.flagMount.style.transform.indexOf('rotate(84deg)') >= 0 &&
+  parseInt(ui.el.flagCloth.style.width, 10) <= 6,
+  'w=' + ui.el.flagCloth.style.width + ' t=' + ui.el.flagMount.style.transform);
+
 console.log(fails ? '\nFAILURES: ' + fails : '\nALL UI DOM CHECKS PASSED');
 process.exit(fails ? 1 : 0);

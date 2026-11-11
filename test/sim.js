@@ -239,10 +239,12 @@ check('napalm pours LIQUID FIRE — no blast, no crater, just the fire event',
   !r.events.some(function (e) { return e.type === 'blast'; }),
   JSON.stringify(r.events.map(function (e) { return e.type; })));
 
-// bomblets: they now DO detonate — in small blasts — and drift down slowly
+// bomblets: they DO detonate — and now at FULL Basic-Shot scale
 r = runProj(SE.Weapons.create('clusterlet', 300, 100, 60, 6, 0), 600);
-check('bomblets explode in SMALL blasts (area weapon again)',
-  r.events.some(function (e) { return e.type === 'blast' && e.radius <= 40 && e.radius >= 12; }),
+check('bomblets explode at FULL Basic scale (drifting is the trick, not weakness)',
+  r.events.some(function (e) {
+    return e.type === 'blast' && e.radius === SE.weaponById('basic').explosion.radius;
+  }),
   JSON.stringify(r.events.map(function (e) { return e.type; })));
 
 // their fall speed is capped, so bomblets DRIFT instead of dropping like stones
@@ -276,6 +278,32 @@ check('bomblets explode in SMALL blasts (area weapon again)',
     blastXs.length === 3 && blastXs[1] >= blastXs[0] && blastXs[2] >= blastXs[1] &&
     blastXs[2] - blastXs[0] > 50,
     JSON.stringify(blastXs.map(function (x) { return Math.round(x); })));
+
+  /* hops must be STRONG: on open ground every leap carries far. */
+  const tL = new SE.Terrain(CFG.W, CFG.H);
+  for (let x = 0; x < CFG.W; x++) {
+    tL.tops[x] = 500; tL.counts[x] = CFG.H - 500;
+    for (let y = 500; y < CFG.H; y++) tL.data[y * CFG.W + x] = 1;
+  }
+  let curL = SE.Weapons.create('leapfrog', 80, 497, 8, 3, 0);
+  const hopXs = [];
+  let guardL = 0;
+  while (curL && guardL++ < 8) {
+    const kids = [];
+    const ctxL = {
+      terrain: tL, tanks: [], wind: 0, W: CFG.W,
+      spawn: function (id, x, y, vx, vy, o) { kids.push(SE.Weapons.createVelocity(id, x, y, vx, vy, o)); },
+    };
+    const evL = [];
+    for (let f = 0; f < 900 && !curL.dead; f++) SE.Weapons.step(curL, ctxL, evL);
+    const bl = evL.find(function (e) { return e.type === 'blast'; });
+    if (!bl) break;
+    hopXs.push(bl.x);
+    curL = kids[0] || null;
+  }
+  check('on open ground each leap carries OVER 100 px downrange',
+    hopXs.length === 3 && hopXs[1] - hopXs[0] > 100 && hopXs[2] - hopXs[1] > 100,
+    JSON.stringify(hopXs.map(function (x) { return Math.round(x); })));
 }
 
 /* FUNNY BOMB: normal blast, then 3 firecrackers in random directions. */
@@ -310,6 +338,31 @@ check('bomblets explode in SMALL blasts (area weapon again)',
   });
   check('scatter is deterministic per impact but changes with the shot', same && differs,
     'same=' + same + ' differs=' + differs);
+
+  /* the main blast must have DETONATED before the shots start flying —
+     firecrackers wait FUSED for exactly the blast's telegraph time. */
+  const kidFuse = SE.weaponById('funnylet').fuse;
+  check('firecrackers are fused until the main blast detonates (fuse >= telegraph)',
+    kidFuse >= CFG.BLAST_TELEGRAPH, 'fuse=' + kidFuse);
+  {
+    const r4 = runProj(SE.Weapons.create('funny', 300, 100, 60, 8, 0), 900);
+    const kid = r4.spawned[0];
+    const kx = kid.x, ky = kid.y;
+    const ctxK = { terrain: terr, tanks: [], wind: 0, W: CFG.W, spawn: function () {} };
+    const evK = [];
+    for (let f = 0; f < kidFuse - 4 && !kid.dead; f++) SE.Weapons.step(kid, ctxK, evK);
+    check('during the fuse it sits dead still — no movement, no events',
+      kid.fuseLeft > 0 && Math.abs(kid.x - kx) < 1e-9 && Math.abs(kid.y - ky) < 1e-9 && evK.length === 0,
+      'moved=' + (kid.x - kx).toFixed(2) + ' ev=' + evK.length);
+    // the instant the fuse is over it MUST take off (launch speed ≥3.2)
+    for (let f = 0; f < 12; f++) SE.Weapons.step(kid, ctxK, evK);
+    check('once the fuse ends it takes off — real flight begins',
+      Math.hypot(kid.x - kx, kid.y - ky) > 2, 'dist=' + Math.hypot(kid.x - kx, kid.y - ky).toFixed(2));
+    for (let f = 0; f < 900 && !kid.dead; f++) SE.Weapons.step(kid, ctxK, evK);
+    check('it then pops like a normal round',
+      evK.some(function (e) { return e.type === 'blast'; }),
+      'ev=' + evK.map(function (e) { return e.type; }).join(','));
+  }
 }
 
 // every explosive weapon clears its ENTIRE damage circle
@@ -321,6 +374,22 @@ check('all explosive weapons dig with crater factor 1.0 (full circle)',
     if (w.behavior === 'hop' || w.behavior === 'funny') return w.explosion.crater >= 0.999;
     return true;   // thud / cluster parent / addground / fire: no digging blast of their own
   }));
+
+// Leap Frog, Cluster, Roller and Funny Bomb explosions = STANDARD ammo size
+{
+  const B = SE.weaponById('basic').explosion;
+  const fullScale = function (e) {
+    return e.radius === B.radius && e.damage === B.damage && e.crater >= 0.999;
+  };
+  check('Leap Frog stages ALL explode at Basic-Shot scale',
+    ['leapfrog', 'leapfrog2', 'leapfrog3'].every(function (id) { return fullScale(SE.weaponById(id).explosion); }));
+  check('Cluster bomblets explode at Basic-Shot scale',
+    fullScale(SE.weaponById('clusterlet').explosion));
+  check('the Roller stops with a Basic-Scale blast',
+    fullScale(SE.weaponById('roller').roll.explode));
+  check('Funny Bomb main blast AND firecrackers are Basic-Scale',
+    fullScale(SE.weaponById('funny').explosion) && fullScale(SE.weaponById('funnylet').explosion));
+}
 
 // muzzle speed: the power dial may reach POWER_MAX; 200 = exactly 2× of 100
 {
@@ -675,23 +744,38 @@ console.log('[tanks buried by the ground]');
     q.alive && q.y === qy0 - 6, 'q.y=' + q.y + ' was ' + qy0);
 }
 
-/* destroyed tanks EXPLODE — the first death effect, leaving a real small crater */
-console.log('[death effect: explosion]');
+/* destroyed tanks explode LIKE NORMAL AMMO: same blast effect and scale as a
+   Basic Shot, a full-size crater — and the wreck blast damages neighbours,
+   so wrecks can CHAIN. */
+console.log('[death effect: explosion like normal ammo]');
 {
   const g = bareGame(61);
   let ns = 0; while (g.terrain.settleStep() && ns++ < 9000);
-  const kinds = [];
-  g.on('fx', function (e) { kinds.push(e.kind); });
+  const fxs = [];
+  g.on('fx', function (e) { fxs.push(e); });
   const v = g.players[1];
   const mass0 = g.terrain.countSolid();
   g.damage(v, CFG.HP, 0, 'test');
-  check('a destroyed tank emits a death-explosion effect',
-    !v.alive && kinds.indexOf('deathExplosion') >= 0, 'kinds=' + kinds.join(','));
+  const B = SE.weaponById('basic').explosion;
+  const boom = fxs.find(function (e) { return e.kind === 'explosion' && Math.abs(e.x - v.x) < 0.01; });
+  check('a destroyed tank explodes with the NORMAL ammo blast effect, same size',
+    !v.alive && !!boom && boom.r === B.radius,
+    'fx=' + fxs.map(function (e) { return e.kind + (e.r ? '(' + e.r + ')' : ''); }).join(','));
   const removed = mass0 - g.terrain.countSolid();
-  check('its own blast leaves a small crater in the ground',
-    removed >= 20, 'removed px=' + removed);
-  check('the death crater stays small (tuned by DEATH_BLAST_R)',
-    removed <= 2500, 'removed px=' + removed);
+  check('the wreck blast digs a FULL-SIZE crater, like any shell',
+    removed >= 200, 'removed px=' + removed);
+
+  // chain reaction: a neighbour well inside the wreck blast is hit too
+  const g2 = bareGame(62);
+  ns = 0; while (g2.terrain.settleStep() && ns++ < 9000);
+  const a = g2.players[0], c = g2.players[1];
+  a.x = 300; a.y = g2.terrain.top(300);
+  c.x = 340; c.y = g2.terrain.top(340);
+  c.hp = 1e9;
+  const hp0 = c.hp;
+  g2.damage(a, CFG.HP, null, 'test');
+  check('the wreck blast damages nearby tanks — wrecks CHAIN',
+    c.hp < hp0, 'hp=' + c.hp);
 }
 
 /* extra shields sit in the bag and are raised DURING your move */

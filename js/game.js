@@ -780,13 +780,19 @@ class Game {
   }
 
   /* ---------- death effects (pluggable — "explosion" is the first kind;
-     later: per-weapon death styles can pick by cause) ---------- */
+     later: per-weapon death styles can pick by cause).
+     A destroyed tank explodes like a NORMAL round: the Basic Shot's own
+     blast — same telegraphed circle semantics (we apply it straight away,
+     the wreck does not wait for the next frame), same crater, and it
+     DAMAGES nearby tanks — wrecks chain. (Applied with NO owner: it is an
+     exploding wreck, not a shot — the AI's ballistics memory stays honest.) */
   _deathFx(t) {
+    if ((this._deathChain = (this._deathChain || 0) + 1) > 9) { this._deathChain--; return; }
     const cy = t.y - CFG.TANK_H / 2;
-    this.emit('fx', { kind: 'deathExplosion', x: t.x, y: cy, owner: t.id });
-    if (!(CFG.DEATH_BLAST_R > 0)) return;
-    // the wreck's own blast leaves a real (small) dent in the ground
-    this.terrain.dig(t.x, cy, CFG.DEATH_BLAST_R, 1);
+    const b = SE.weaponById('basic').explosion;
+    this.applyBlast({ x: t.x, y: cy, radius: b.radius, damage: b.damage,
+      crater: b.crater, craterY: b.craterY, owner: null });
+    this._deathChain--;
     let n = 0;
     while (n < 200 && this.terrain.settleStep()) n++;
     // tanks whose support the collapse just took away settle NOW, unless the

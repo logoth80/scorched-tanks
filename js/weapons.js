@@ -12,7 +12,12 @@
  *   'fire'        fly → pour liquid fire (flows downhill, burns for a while)
  *   'hop'         fly → blast → spawn child HOPPING forward → blast → … (Leap Frog)
  *   'funny'       fly → blast → 3 children in random directions that just
- *                 explode normally (Funny Bomb)
+ *                 explode normally (Funny Bomb). Children carry a `def.fuse`
+ *                 countdown: they sit still while the main blast detonates,
+ *                 so the order on screen is BLAST FIRST, then the shots.
+ *
+ * Optional def fields honoured by the flier: `fuse` (frames to wait in
+ * place before flight begins) — used to order chain weapons correctly.
  *
  * step(p, ctx, out) pushes events into `out` which the game applies:
  *   {type:'blast'|'add'|'fire'|'direct'|'fx'|'despawn'}
@@ -37,7 +42,10 @@ const Weapons = {
   },
   createVelocity(defId, x, y, vx, vy, owner) {
     const def = SE.weaponById(defId);
-    return { def, x, y, vx, vy, prevVy: vy, t: 0, state: 'fly', rollT: 0, owner };
+    /* def.fuse: wait in place for N frames before flying — the Funny Bomb's
+       firecrackers sit still while the main blast detonates, THEN scatter */
+    return { def, x, y, vx, vy, prevVy: vy, t: 0, state: 'fly', rollT: 0, owner,
+      fuseLeft: def.fuse || 0 };
   },
 
   speedOf(def, power) {
@@ -54,6 +62,10 @@ const Weapons = {
   /* ---------------- flight ---------------- */
   _fly(p, ctx, out) {
     const def = p.def, L = def.launch;
+
+    /* fused sub-projectile (Funny Bomb): waits for the parent blast to go
+       off first — explode, THEN send the shots */
+    if (p.fuseLeft > 0) { p.fuseLeft--; return; }
 
     // cluster fuse: split JUST BEFORE the top of the arc, into a range ladder
     if (def.behavior === 'cluster') {

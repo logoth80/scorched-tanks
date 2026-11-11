@@ -73,10 +73,12 @@ Deploy from a branch → default branch / root** — it will serve `index.html` 
   shield instantly shatters into shards. Extra shields stay in your **bag**: when one
   is in there, a **🛡 Raise shield** button appears during your own move. A shield
   is useless underground — a buried tank never gets the "first hit" favor.
-- A destroyed tank **goes out with its own explosion** — it really digs a small
-  crater (`DEATH_BLAST_R`) and the surrounding ground collapses into it. Today every
-  death uses the same blast; `_deathFx()` in `js/game.js` is the hook where
-  per-cause death styles will live.
+- A destroyed tank **goes out like a normal round of ammo**: its wreck detonates with
+  the Basic Shot's own blast — same scale, same crater — and that blast **damages
+  nearby tanks too, so wrecks can chain**. (It is applied with no "owner": an
+  exploding wreck is not a shot, and the AI's ballistics memory stays honest.)
+  Today every death uses this one effect; `_deathFx()` in `js/game.js` is the hook
+  where per-cause death styles will live.
 
 ## Ammunition
 
@@ -90,13 +92,13 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 | Ammo | Effect |
 |---|---|
 | Basic Shot | free, unlimited |
-| Cluster Bomb | **splits just before its apex into 3 bomblets**: one continues on the original trajectory, one lands a bit further, one further still — a range ladder of small blasts |
-| Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows |
+| Cluster Bomb | **splits just before its apex into 3 bomblets**: one continues on the original trajectory, one lands a bit further, one further still — a range ladder of **full-size (Basic-scale) blasts**; the drift is the trick, not weakness |
+| Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows with a **Basic-scale blast** |
 | Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; see below |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
-| Leap Frog | **explodes on impact, then HOPS forward and explodes again — three times over**: the blast spawns a hidden frog that jumps downrange, and it spawns one more (a chain of plain table entries, fully tunable) |
-| Funny Bomb | **explodes on impact, then pops 3 firecrackers in random directions** — each a small normal blast; the scatter draws from the match's own seeded RNG, so a replay of the same shot scatters identically |
+| Leap Frog | **explodes on impact, then HOPS a long way forward and explodes again — three times over**: every stage is a **Basic-scale blast** and every leap carries ~150–200 px on open ground (a chain of plain table entries: `vx/vy` per hop, fully tunable) |
+| Funny Bomb | **BOOM first — THEN the punchline**: it explodes on impact, and only after that blast has actually detonated (firecrackers sit fused for exactly its telegraph time) do **3 firecrackers pop out in random directions**, each a **Basic-scale blast**; the scatter draws from the match's own seeded RNG, so a replay of the same shot scatters identically |
 
 **Liquid fire** is a per-column fluid (`js/terrain.js`: `fire[]` + flow/burn rules).
 It behaves like heavy liquid fuel: it **spreads sideways only slowly** (gentle
@@ -147,6 +149,10 @@ Example of adding your own in seconds:
   naming your current shell; it opens the picker only when you ask, and closes
   after you choose. When a spare shield sits in your bag, a **🛡 Raise shield**
   button appears during your own move.
+- **The wind flag is a HUD element, not a world object** — it is a real DOM flag
+  in the top bar, so terrain, craters and screen shake can never cover, move or
+  knock it down. Cloth length + flutter speed read the strength, mirroring reads
+  the direction, and in dead calm it hangs down the pole.
 - Your aim (angle/power) and chosen ammo **carry over to your next turn** —
   correct like a real artillery spotter instead of re-dialing from scratch.
 - Setup screen picks players (HUMAN/CPU mix), seat names, and battle count —
@@ -183,15 +189,18 @@ The engine is DOM-free, so the whole game can be simulated headless:
 
 ```sh
 node test/sim.js      # terrain invariants, open map borders, every weapon incl.
-                      # liquid-fire flow/kill rules, leap frog & funny bomb chains,
-                      # one-hit shields, burial crush, death-explosion craters,
-                      # power cap, strict turn pipeline,
-                      # nicknames, per-map-dealt (fight-fixed) turn order, random spawn
-                      # slots, multi-battle match flow, 5 seeded full matches + an 8P match
+                      # liquid-fire flow/kill rules, leap frog chain (full-size
+                      # blasts + long hops) and funny-bomb fuse ordering,
+                      # one-hit shields, burial crush, chaining wreck blasts
+                      # (Basic-scale, like normal ammo), power cap, strict turn
+                      # pipeline, nicknames, per-map-dealt (fight-fixed) turn
+                      # order, random spawn slots, multi-battle match flow,
+                      # 5 seeded full matches + an 8P match
 node test/stress.js   # 40 seeded matches: all must terminate
 node test/ui_dom.js   # DOM-free smoke of the UI layer via a tiny DOM stub:
                       # shot-order-sorted card strip (re-sorts on new maps),
-                      # openable ammo dropdown, raise-shield button rules
+                      # openable ammo dropdown, raise-shield button rules,
+                      # the HUD wind flag reading strength/direction/calm
 ```
 
 ## Files

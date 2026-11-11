@@ -165,28 +165,10 @@ class Renderer {
         }
         break;
       }
-      case 'deathExplosion': { // destroyed tanks blow up (first death effect)
-        this.shake = Math.max(this.shake, 9);
-        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 3, r1: 52, ttl: 13, t: 0 });
-        this.particles.push({ k: 'ring', x: e.x, y: e.y, r0: 2, r1: 28, ttl: 8, t: 0 });
-        for (let i = 0; i < 7; i++) {
-          this.particles.push({ k: 'drop', x: e.x + (Math.random() - 0.5) * 10, y: e.y,
-            vx: (Math.random() - 0.5) * 3.4, vy: -1.5 - Math.random() * 2.5,
-            ttl: 20 + Math.random() * 14, t: 0 });
-        }
-        for (let i = 0; i < 12; i++) {
-          this.particles.push({ k: 'dust', x: e.x, y: e.y,
-            vx: (Math.random() - 0.5) * 3, vy: -Math.random() * 2.2,
-            ttl: 22 + Math.random() * 16, t: 0 });
-        }
-        for (let i = 0; i < 10; i++) {   // its own scrap flying apart
-          const a = Math.random() * Math.PI * 2, sp = 1.2 + Math.random() * 3.8;
-          this.particles.push({ k: 'shard', x: e.x, y: e.y,
-            vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1,
-            ttl: 26 + Math.random() * 16, t: 0, c: '#3a3f49' });
-        }
+      case 'deathExplosion':
+        /* (kept for compatibility) — a wreck's blast now goes through the
+           NORMAL 'explosion' fx like any ammo; nothing special to draw. */
         break;
-      }
       case 'parachute':
         break;
     }
@@ -216,7 +198,8 @@ class Renderer {
     ctx.drawImage(this.sky, 0, 0);
     ctx.drawImage(this.tcv, 0, 0);
     this._drawFire();             // burning fluid hugs the ground, tanks wade/are swallowed by it
-    this._drawWindFlag();
+    /* the wind flag is NOT drawn in the world anymore — it lives in the HUD
+       (a DOM element), so terrain, craters and shaking never touch it */
 
     for (const t of game.players) if (t.alive) this._drawTank(t);
     this._drawProjectiles();
@@ -393,24 +376,6 @@ class Renderer {
         ctx.beginPath(); ctx.arc(b.x, b.y, r + 2, 0, 7); ctx.stroke();
       }
     }
-  }
-
-  /* ---------- wind flag planted in the ground ---------- */
-  _drawWindFlag() {
-    const game = this.game, ctx = this.ctx;
-    const fx = 52, fy = game.terrain.top(fx) - 1;
-    ctx.strokeStyle = '#d8dde6'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx, fy - 26); ctx.stroke();
-    const w = game.wind, mag = Math.abs(w) / CFG.WIND_MAX;
-    const dir = w >= 0 ? 1 : -1;
-    const len = 6 + mag * 16;
-    const droop = 4 + (1 - mag) * 6;
-    ctx.fillStyle = 'rgba(230,235,245,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(fx, fy - 26);
-    ctx.lineTo(fx + dir * len, fy - 26 + droop * 0.4 + Math.sin(this.time * 0.1) * 1.2);
-    ctx.lineTo(fx, fy - 26 + droop + 3);
-    ctx.closePath(); ctx.fill();
   }
 
   /* ---------- burns / particles / floaters ---------- */

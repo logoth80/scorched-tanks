@@ -100,9 +100,10 @@ SE.CONFIG = {
   PARA_VY: 1.6,             // terminal speed while parachuting
   PARA_RESCUE: 0.15,        // parachuted landings keep only 15% of fall damage
 
-  /* Death effect: a destroyed tank EXPLODES — its own blast leaves this
-     small crater in the ground (particles + dig; damage is already done). */
-  DEATH_BLAST_R: 16,
+  /* Death effect: a destroyed tank explodes like a NORMAL ammo — the blast is
+     the Basic Shot's own explosion (radius/damage/crater from its table entry,
+     so tuning Basic retunes wreck-blasts too). It even chains: a wreck blast
+     damages nearby tanks. See Game._deathFx. */
 
   /* A match = best-of series of battles. The shop runs ONLY before the
      first battle and between battles — never mid-battle. Between
@@ -184,7 +185,7 @@ SE.WEAPONS = [
   },
   {
     id: 'cluster', name: 'Cluster Bomb', price: 600, count: 3,
-    desc: 'Splits just BEFORE the top of its arc into 3 bomblets: one follows the original trajectory, the other two land progressively further on. They pop in small blasts.',
+    desc: 'Splits just BEFORE the top of its arc into 3 bomblets: one follows the original trajectory, the other two land progressively further on. Each pops in a full-size blast.',
     color: '#ffb347', trail: 'rgba(255,179,71,0.5)', size: 3,
     launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.1, drag: 0 },
     behavior: 'cluster',
@@ -195,13 +196,15 @@ SE.WEAPONS = [
   },
   {
     id: 'clusterlet', name: 'Bomblet', hidden: true,
-    desc: 'Bomblet from the Cluster Bomb. Drifts down slowly, then pops in a small blast.',
+    desc: 'Bomblet from the Cluster Bomb. Drifts down slowly, then pops in a full-size blast.',
     color: '#ffd27a', trail: 'rgba(255,210,122,0.4)', size: 1.8,
     /* low terminal velocity (terminal) + drag = it floats down like real
        cluster bomblets, letting wind scatter it over a wide pattern */
     launch: { speedScale: 1, gravityScale: 0.85, windScale: 1.3, drag: 0.01, terminal: 2.4 },
     behavior: 'explode',
-    explosion: { radius: 26, damage: 45, crater: 1.0 },
+    /* bomblets pop at FULL Basic-Shot scale — drifting is the trick,
+       not being weak */
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
   },
   {
     id: 'roller', name: 'Roller', price: 300, count: 5,
@@ -212,7 +215,7 @@ SE.WEAPONS = [
     roll: {
       slopeAccel: 0.16, friction: 0.993, maxSpeed: 7, stopSpeed: 0.3,
       maxTime: 900,
-      explode: { radius: 42, damage: 85, crater: 1.0 },
+      explode: { radius: 63, damage: 100, crater: 1.0 },   // full Basic scale
     },
   },
   {
@@ -246,12 +249,12 @@ SE.WEAPONS = [
   },
   {
     id: 'leapfrog', name: 'Leap Frog', price: 500, count: 2,
-    desc: 'Explodes on impact, then HOPS forward and explodes again — and hops once more. Three blasts chasing downrange.',
+    desc: 'Explodes on impact, then HOPS a long way forward and explodes again — and leaps once more. Three full-size blasts chasing downrange.',
     color: '#8ee06e', trail: 'rgba(142,224,110,0.5)', size: 2.8,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'hop',
-    explosion: { radius: 44, damage: 75, crater: 1.0 },
-    hop: { child: 'leapfrog2', vx: 2.4, vy: 4.2 },
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
+    hop: { child: 'leapfrog2', vx: 3.0, vy: 5.0 },
   },
   {
     id: 'leapfrog2', name: 'Leap Frog (2nd hop)', hidden: true,
@@ -259,8 +262,8 @@ SE.WEAPONS = [
     color: '#a8e88a', trail: 'rgba(168,232,138,0.45)', size: 2.5,
     launch: { speedScale: 1, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'hop',
-    explosion: { radius: 40, damage: 70, crater: 1.0 },
-    hop: { child: 'leapfrog3', vx: 2.0, vy: 3.4 },
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
+    hop: { child: 'leapfrog3', vx: 2.6, vy: 4.2 },
   },
   {
     id: 'leapfrog3', name: 'Leap Frog (final splash)', hidden: true,
@@ -268,24 +271,27 @@ SE.WEAPONS = [
     color: '#c2efac', trail: 'rgba(194,239,172,0.4)', size: 2.2,
     launch: { speedScale: 1, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'explode',
-    explosion: { radius: 36, damage: 65, crater: 1.0 },
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
   },
   {
     id: 'funny', name: 'Funny Bomb', price: 450, count: 2,
-    desc: 'Explodes on impact — then pops THREE little firecrackers in RANDOM directions. Where they land is anybody\'s guess.',
+    desc: 'BOOM first — and only when that blast has actually gone off do THREE firecrackers pop out in RANDOM directions. Where they land is anybody\'s guess.',
     color: '#ff8ad4', trail: 'rgba(255,138,212,0.55)', size: 3,
     launch: { speedScale: 0.95, gravityScale: 1.0, windScale: 1.0, drag: 0 },
     behavior: 'funny',
-    explosion: { radius: 52, damage: 85, crater: 1.0 },
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
     funny: { count: 3, child: 'funnylet', angleMin: 25, angleMax: 155, speedMin: 3.2, speedMax: 7.4 },
   },
   {
     id: 'funnylet', name: 'Firecracker', hidden: true,
-    desc: 'One of the Funny Bomb\'s random little pops.',
+    desc: 'One of the Funny Bomb\'s random pops. Waits for the main blast to detonate, then flies.',
     color: '#ffc2e6', trail: 'rgba(255,194,230,0.45)', size: 1.8,
     launch: { speedScale: 1, gravityScale: 1.0, windScale: 1.2, drag: 0.006 },
     behavior: 'explode',
-    explosion: { radius: 24, damage: 35, crater: 1.0 },
+    /* fuse: sits still until the parent blast has DETONATED (its telegraph
+       is BLAST_TELEGRAPH frames) — explode first, THEN send the shots */
+    fuse: 95,
+    explosion: { radius: 63, damage: 100, crater: 1.0 },
   },
 ];
 

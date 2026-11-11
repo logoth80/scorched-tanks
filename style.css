@@ -27,6 +27,24 @@ body { display: flex; align-items: center; justify-content: center; }
   border-radius: 6px; padding: 3px 10px; font-size: 12px; }
 #topbar button:hover { background: #2d3a4f; }
 #windBox b { font-size: 15px; }
+/* HUD wind flag — a real DOM element in the top bar: terrain, craters and
+   screen shake can never cover or move it. Cloth length + flutter speed =
+   strength; mirrored = direction; hangs down the pole when calm. */
+#windGauge { position: relative; display: inline-block; width: 26px; height: 26px;
+  vertical-align: -7px; }
+#flagPole { position: absolute; left: 4px; bottom: 1px; width: 2px; height: 23px;
+  background: #d8dde6; border-radius: 1px; }
+#flagMount { position: absolute; left: 6px; top: 2px; height: 9px; width: 0;
+  transform-origin: 0 50%; transform: rotate(84deg); }
+#flagCloth { display: block; height: 9px; width: 6px;
+  background: rgba(230, 235, 245, 0.92);
+  clip-path: polygon(0 0, 100% 45%, 0 100%);
+  transform-origin: 0 50%;
+  animation: flagFlutter 1.4s ease-in-out infinite alternate; }
+@keyframes flagFlutter {
+  from { transform: skewY(-4deg) scaleX(0.9); }
+  to   { transform: skewY(5deg)  scaleX(1); }
+}
 #roundLabel { color: #9fb4cc; }
 
 /* ---------------- player cards — full-width strip along the bottom.

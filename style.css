@@ -104,6 +104,7 @@ body { display: flex; align-items: center; justify-content: center; }
   border-radius: 5px; padding: 3px 8px; font-size: 11px; }
 .ammoBtn.on { background: #2f5d8a; border-color: #4d84b8; }
 .ammoBtn.off { opacity: .35; }
+.ammoBtn.shieldOpt { border-color:#3f7f5e; color:#8fe3b2; }
 /* the ammo list is openable: the picker shows the current selection */
 #ammoPick { min-width: 170px; text-align: left; }
 #ammoPick b { color: #ffe27a; }

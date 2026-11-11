@@ -130,7 +130,12 @@ const AI = {
 
   _pickWeapon(shooter, game, target) {
     const owned = Object.keys(shooter.ammo).filter(function (id) {
-      return shooter.ammo[id] > 0 && id !== 'basic';
+      if (!(shooter.ammo[id] > 0) || id === 'basic') return false;
+      const d = SE.weaponById(id);
+      /* the AI fights, it does not landscaping: utility rounds (Fissure)
+         would be wasted on pure terrain work — never fire them */
+      if (d && d.behavior === 'fissure') return false;
+      return true;
     });
     if (!owned.length || Math.random() > 0.65) return 'basic';
     const pick = owned[Math.floor(Math.random() * owned.length)];

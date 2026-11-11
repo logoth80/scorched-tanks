@@ -15,6 +15,8 @@
  *                 explode normally (Funny Bomb). Children carry a `def.fuse`
  *                 countdown: they sit still while the main blast detonates,
  *                 so the order on screen is BLAST FIRST, then the shots.
+ *   'fissure'     fly → tear a LONG JAGGED CRACK in the ground — no blast,
+ *                 no damage (def.nodamage: hulls stop it harmlessly).
  *
  * Optional def fields honoured by the flier: `fuse` (frames to wait in
  * place before flight begins) — used to order chain weapons correctly.
@@ -94,7 +96,14 @@ const Weapons = {
       if (p.t > 4000) { p.dead = true; return; } // hard safety cap
       if (ctx.terrain.solid(p.x, p.y)) { this._impact(p, ctx, out); return; }
       const t = this._tankHit(p, ctx);
-      if (t) { p.dead = true; out.push({ type: 'direct', tank: t, owner: p.owner, def }); return; }
+      if (t) {
+        if (def.nodamage) {
+          /* utility round (Fissure Bomb): the hull simply STOPS it — no
+             damage, no direct-hit kill; it tears the ground under the tank */
+          this._impact(p, ctx, out); return;
+        }
+        p.dead = true; out.push({ type: 'direct', tank: t, owner: p.owner, def }); return;
+      }
     }
   },
 
@@ -149,6 +158,11 @@ const Weapons = {
       out.push({ type: 'fire', x: p.x, y: p.y, owner: p.owner,
         radius: def.fire.radius, depth: def.fire.depth, life: def.fire.life });
       out.push({ type: 'fx', kind: 'fire', x: p.x, y: p.y });
+      return;
+    }
+    if (b === 'fissure') {   // Fissure Bomb: no blast, no damage — the ground IS the target
+      out.push({ type: 'fissure', x: p.x, y: p.y, owner: p.owner, spec: def.fissure });
+      out.push({ type: 'fx', kind: 'thud', x: p.x, y: p.y });
       return;
     }
     if (b === 'hop') {   // Leap Frog: blast here, then hop FORWARD and blast again

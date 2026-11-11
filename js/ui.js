@@ -301,6 +301,7 @@ class UI {
     tp.classList.toggle('cpuTurn', !isHuman);
     // ammo list — an OPEN-ON-DEMAND dropdown, opened by the picker button
     const row = this.el.ammoRow;
+    const bag = (p.ammo && p.ammo.shield) || 0;
     let wanted = '<button class="ammoBtn' + (p.selected === 'basic' ? ' on' : '') + '" data-wid="basic">Basic ∞</button>';
     for (const w of SE.shopWeapons()) {
       if (w.free) continue;
@@ -308,13 +309,18 @@ class UI {
       wanted += '<button class="ammoBtn' + (n <= 0 ? ' off' : (p.selected === w.id ? ' on' : '')) +
         '" data-wid="' + w.id + '"' + (n <= 0 ? ' disabled' : '') + '>' + w.name + ' ' + n + '</button>';
     }
+    /* the shield lives IN this open list too: one click raises it right
+       now — exactly the rules of the HUD button (own move, not already
+       raised, bag has one) */
+    if (isHuman && bag > 0 && !p.shield) {
+      wanted += '<button class="ammoBtn shieldOpt" data-shield="1">Raise shield ' + bag + '</button>';
+    }
     if (row.dataset.sig !== wanted) { row.dataset.sig = wanted; row.innerHTML = wanted; }
     row.classList.toggle('hidden', !this._ammoOpen);
     const selW = SE.weaponById(p.selected);
     this.el.ammoPickName.textContent = (selW ? selW.name : 'Basic') +
       (p.selected === 'basic' ? ' ∞' : ' ' + (p.ammo[p.selected] || 0));
     // shield from the bag — usable right now, during your own move
-    const bag = (p.ammo && p.ammo.shield) || 0;
     const sb = this.el.useShieldBtn;
     sb.style.display = (isHuman && bag > 0 && !p.shield) ? '' : 'none';
     this.el.shieldBag.textContent = bag;
@@ -333,6 +339,12 @@ class UI {
       } else if (t.dataset && t.dataset.power !== undefined && self.game) {
         const p = self.game.current();
         if (p && p.human) self.game.aimTo(p.id, p.angle, p.power + parseFloat(t.dataset.power));
+      } else if (t.dataset && t.dataset.shield !== undefined && self.game) {
+        const p = self.game.current();
+        if (p && p.human && !p.shield && ((p.ammo && p.ammo.shield) || 0) > 0) {
+          self.game.useShield(p.id); SE.sfx.click();
+          self._ammoOpen = false; self._syncTurnPanel();
+        }
       } else if (t.dataset && t.dataset.wid && self.game) {
         const p = self.game.current();
         if (p && p.human) { self.game.selectWeapon(p.id, t.dataset.wid); SE.sfx.click(); self._ammoOpen = false; }

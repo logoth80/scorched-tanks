@@ -469,28 +469,37 @@ console.log('[fire hazard]');
   check('fire burns out completely after its life runs out', !T.hasFire());
 }
 
-/* the hazard: submersion kills, shallow contact burns over time.
-   We carve a FLAT-bottomed basin so the fluid behaves predictably. */
-function levelBasin(T, cx, halfW) {
+/* the hazard: drowning kills ONLY "between high walls"; shallow contact
+   is a mild sting over time. We carve a FLAT-bottomed basin so the fluid
+   behaves predictably, and optionally pile HIGH RIMS just outside the
+   floor — that is the "in between high walls" situation where deep fluid
+   is meant to drown a tank. */
+function levelBasin(T, cx, halfW, opts) {
+  const o = opts || {};
+  const flat = o.flat || 60;
   let bx = cx, top = -1;
   for (let x = Math.max(60, cx - halfW); x <= Math.min(CFG.W - 60, cx + halfW); x++)
     if (T.tops[x] > top) { top = T.tops[x]; bx = x; }
   const fy = T.tops[bx];
-  for (let x = bx - 60; x <= bx + 60; x++) {
+  for (let x = bx - flat; x <= bx + flat; x++) {
     for (let y = T.tops[x]; y < fy; y++) T.data[y * T.W + x] = 0;
     T.refreshTop(x);
+  }
+  if (o.walls) {                       // high rims → a genuine pit
+    T.add(bx - flat - 8, fy - 24, 16, 0);
+    T.add(bx + flat + 8, fy - 24, 16, 0);
   }
   return bx;
 }
 {
   const g = bareGame(51);
   const T = g.terrain;
-  const bx = levelBasin(T, 500, 150);
+  const bx = levelBasin(T, 500, 150, { walls: true });
   const v = g.players[1];
   v.x = bx; v.y = T.top(bx);
-  T.addFire(bx, 40, 15, 600, 0);        // deep pool right on the tank
+  T.addFire(bx, 40, 15, 600, 0);        // deep pool, tank trapped between walls
   g._tickFire();
-  check('tank FULLY SUBMERGED in fire dies; credit goes to the fire owner',
+  check('tank SUBMERGED BETWEEN HIGH WALLS dies; credit goes to the fire owner',
     !v.alive && g.players[0].kills === 1 && v.deathRank > 0,
     'alive=' + v.alive + ' kills=' + g.players[0].kills);
   check('battle with only one tank left ends immediately',
@@ -518,14 +527,157 @@ function levelBasin(T, cx, halfW) {
   // fresh, long-lived pool: this checks the DOT rule, not fire lifespan
   T.addFire(bx, 40, 8, 90000, 0);
   let guard = 0;
-  while (v.alive && guard++ < 2000) g._tickFire();
+  while (v.alive && guard++ < 4000) g._tickFire();
   check('sustained contact with the fire pool eventually kills the tank',
     !v.alive && g.players[0].kills === 1);
 }
 {
+  /* THE new rule: deep fluid over an OPEN plain never drowns — only a tank
+     genuinely trapped between high walls can. And the sting stays mild. */
+  const g = bareGame(55);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150, { flat: 200 });   // wide open plain, NO rims
+  const v = g.players[1];
+  v.x = bx; v.y = T.top(bx);
+  T.addFire(bx, 60, 40, 3000, 0);                      // deep fluid right on it
+  for (let i = 0; i < 10; i++) g._tickFire();
+  check('deep fluid on open ground never instant-kills — no walls, no drowning',
+    v.alive, 'hp=' + v.hp);
+  for (let i = 0; i < 290; i++) g._tickFire();         // ≈5 s with deep fluid
+  check('deep fluid over an open tank only STINGS (survives 5 s with ≥80 hp)',
+    v.alive && v.hp >= 80, 'hp=' + v.hp);
+}
+{
+  /* one wall is not "BETWEEN" walls: a tank beside a rim on an otherwise
+     open plain is never drowned by deep fluid */
+  const g = bareGame(56);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150, { flat: 200, walls: true });  // rims at ±208
+  const v = g.players[1];
+  v.x = bx + 130; v.y = T.top(bx + 130);   // on the plain, near ONE rim side
+  T.addFire(bx + 130, 40, 40, 3000, 0);
+  for (let i = 0; i < 30; i++) g._tickFire();
+  check('beside a single wall the tank is NOT between walls — it survives',
+    v.alive, 'hp=' + v.hp);
+}
+
+/* ---------------- the FISSURE BOMB: tears ground, hurts NOTHING ---------- */
+console.log('[fissure bomb]');
+{
+  const rr = runProj(SE.Weapons.create('fissure', 100, 100, 45, 8, 0), 600);
+  check('fissure shot RIPS THE GROUND instead of exploding',
+    rr.events.some(function (e) { return e.type === 'fissure'; }) &&
+    !rr.events.some(function (e) { return e.type === 'blast'; }) &&
+    !rr.events.some(function (e) { return e.type === 'direct'; }));
+  check('a fissure that hits a TANK hurts it not at all — it just stops',
+    (function () {
+      const g = bareGame(70);
+      const T = g.terrain, t = g.players[1];
+      /* carve a flat shelf so the shot provably meets the HULL, not terrain */
+      let bx = 300, fy = -1;
+      for (let x = bx - 40; x <= bx + 40; x++) fy = Math.max(fy, T.tops[x]);
+      for (let x = bx - 40; x <= bx + 40; x++) {
+        for (let y = T.tops[x]; y < fy; y++) T.data[y * T.W + x] = 0;
+        T.refreshTop(x);
+      }
+      t.x = bx; t.y = fy; t.hp = CFG.HP;
+      const before = t.hp;
+      const p = SE.Weapons.createVelocity('fissure', t.x - 24, t.y - 6, 4, 0, 0);
+      const ctx = { terrain: T, tanks: g.players, wind: 0, W: CFG.W, spawn: function () {} };
+      const ev = [];
+      for (let f = 0; f < 300 && !p.dead; f++) SE.Weapons.step(p, ctx, ev);
+      return t.hp === before && t.alive &&
+        ev.some(function (e) { return e.type === 'fissure'; }) &&
+        !ev.some(function (e) { return e.type === 'direct'; });
+    })());
+}
+{
+  /* full pipeline: the crack is DEFERRED to resolve, opens jagged, keeps
+     its sharp walls (nothing slumps in), and is fully deterministic */
+  const spec = SE.weaponById('fissure').fissure;
+  const g = bareGame(71);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150, { flat: 200 });
+  const pre = T.tops.slice();
+  const m0 = T.countSolid();
+  g._applyEvents([{ type: 'fissure', x: bx, y: T.top(bx), owner: 0, spec: spec }]);
+  check('a fissure never reshapes the ground early — it waits for resolve',
+    T.countSolid() === m0, 'removed ' + (m0 - T.countSolid()));
+  g._startResolve();
+  let guard = 0;
+  while (g.state === 'resolve' && guard++ < 4000) g.tick();
+  const drop = T.tops[bx] - pre[bx];
+  check('the fissure opens: the centre floor drops by a real crack depth',
+    drop >= spec.maxDepth * 0.35, 'drop=' + drop);
+  let edgeShift = 0;
+  for (let x = bx + spec.halfLen + 8; x <= bx + spec.halfLen + 40; x++)
+    edgeShift += Math.abs(T.tops[x] - pre[x]);
+  check('ground beyond the crack rim is never touched', edgeShift === 0, 'shift=' + edgeShift);
+  check('the crack only REMOVES ground — nothing is built', T.countSolid() < m0);
+  let jagged = 0;
+  for (let x = bx - spec.halfLen + 2; x < bx + spec.halfLen - 2; x++)
+    jagged = Math.max(jagged, Math.abs(T.tops[x] - T.tops[x + 1]));
+  check('the crack is a JAGGED rip, not a clean round trench', jagged >= 2, 'max step=' + jagged);
+  check('the full-depth crack SURVIVES settling — sharp walls, no slumping',
+    T.tops[bx] - pre[bx] === drop);
+  const g2 = bareGame(71);
+  const T2 = g2.terrain;
+  const bx2 = levelBasin(T2, 500, 150, { flat: 200 });
+  g2._applyEvents([{ type: 'fissure', x: bx2, y: T2.top(bx2), owner: 0, spec: spec }]);
+  g2._startResolve();
+  let guard2 = 0;
+  while (g2.state === 'resolve' && guard2++ < 4000) g2.tick();
+  let diff = 0;
+  for (let x = 0; x < CFG.W; x++) diff += Math.abs(T.tops[x] - T2.tops[x]);
+  check('the same shot tears the EXACT same crack (deterministic)', diff === 0, 'diff=' + diff);
+}
+{
+  /* a tank standing over the crack FALLS IN — ground gone, no teleport */
+  const spec = SE.weaponById('fissure').fissure;
+  const g = bareGame(73);
+  const T = g.terrain;
+  const bx = levelBasin(T, 500, 150, { flat: 200 });
+  const v = g.players[1];
+  v.x = bx; v.y = T.top(bx);
+  const y0 = v.y;
+  g._applyEvents([{ type: 'fissure', x: bx, y: T.top(bx), owner: 0, spec: spec }]);
+  g._startResolve();
+  let guard = 0;
+  while (g.state === 'resolve' && guard++ < 4000) g.tick();
+  check('a tank over the fissure DROPS IN (never teleported sideways or up)',
+    v.y > y0 + 15, 'y ' + y0 + ' -> ' + v.y);
+}
+{
+  /* the AI fights — it never wastes a turn on pure landscaping */
+  const g = bareGame(75);
+  const p = g.players[0];
+  p.ammo.fissure = 3;
+  let fired = 0, bought = 0;
+  for (let i = 0; i < 25; i++) if (SE.AI.chooseShot(g, p).weaponId === 'fissure') fired++;
+  for (let i = 0; i < 25; i++) if (SE.AI.shopPolicy(g, p).indexOf('fissure') >= 0) bought++;
+  check('CPU never FIRES the Fissure Bomb and never BUYS it either',
+    fired === 0 && bought === 0, 'fired=' + fired + ' bought=' + bought);
+}
+{
+  /* end-to-end smoke: select + fire a REAL fissure shot through fire() */
+  const g = bareGame(77);
+  const p0 = g.players[0];
+  p0.ammo.fissure = 1;
+  g.selectWeapon(0, 'fissure');
+  g.aimTo(0, 45, 70);
+  g.fire();
+  let guard = 0;
+  while ((g.state === 'flight' || g.state === 'resolve') && guard++ < 7000) g.tick();
+  check('a real Fissure shot flies, resolves and ends the turn cleanly',
+    g.state !== 'flight' && g.state !== 'resolve' && !Number.isNaN(p0.x),
+    'state=' + g.state);
+  check('firing consumed one unit from the fissure bag',
+    p0.ammo.fissure === 0, 'bag=' + p0.ammo.fissure);
+}
+{
   const g = bareGame(57);
   const T = g.terrain;
-  const bx = levelBasin(T, 500, 150);
+  const bx = levelBasin(T, 500, 150, { walls: true });
   const v = g.players[1];
   v.x = bx; v.y = T.top(bx);
   v.shield = true;                       // shield eats the FIRST hit — then it's gone

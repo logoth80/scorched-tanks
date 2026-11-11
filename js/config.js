@@ -65,9 +65,12 @@ SE.CONFIG = {
   EDGE_OPEN: 70,
 
   /* Liquid fire (napalm) — a burning fluid that flows down to level,
-     clings to the ground and burns for `life` frames. A tank with fire
-     touching it is hurt every FIRE_TICK frames; FULLY submerged
-     (depth ≥ TANK_H) it dies. All sizes in px per ground column. */
+     clings to the ground and burns for `life` frames. A tank the fire
+     merely touches is stung every FIRE_TICK frames (kept LOW on purpose).
+     DROWNING is special: deep fluid kills ONLY when the tank is between
+     high walls (its ground is a pit ≥ FIRE_PIT_RISE lower than ground on
+     BOTH sides within FIRE_PIT_WIN) — a tank standing on open ground while
+     fluid flows over it is never instantly killed, no matter the depth. */
   FIRE_MAX: 26,             // max depth of burning fluid per column
   FIRE_FLOW: 0.5,           // max px transferred between neighbours per pass (SLOW spreading)
   FIRE_MIN_LEVEL: 0.8,      // below this surface difference fire stops leveling out
@@ -76,8 +79,10 @@ SE.CONFIG = {
   FIRE_SLIDE_DEPTH: 0.7,    // fire must be at least this deep to slide
   FIRE_KEEP: 0.997,         // slow burn-down while still alive
   FIRE_BURNOUT: 0.8,        // fast shrink once its time is up
-  FIRE_DOT: 2,              // harm per tick while merely touched by fire (sting, not a killer)
-  FIRE_TICK: 24,            // frames between fire damage ticks (≈5 hp/s — fire is area denial; SUBMERSION is what kills)
+  FIRE_DOT: 1,              // harm per tick while touched by fire (≈2 hp/s: a slow ember, never a melter)
+  FIRE_TICK: 30,            // frames between fire damage ticks
+  FIRE_PIT_WIN: 120,        // px left/right of the tank that must hold…
+  FIRE_PIT_RISE: 12,        // …a wall at least this high for deep fire to DROWN it ("between high walls")
   FIRE_WAIT_MAX: 560,       // a turn WAITS for burning ground to vanish; hard cap (frames)
 
   /* Tanks — small simple sprites */
@@ -221,11 +226,22 @@ SE.WEAPONS = [
   },
   {
     id: 'napalm', name: 'Napalm', price: 400, count: 2,
-    desc: 'No blast — pours LIQUID FIRE that flows downhill, fills low ground and burns for 5 seconds. A tank submerged in it dies.',
+    desc: 'No blast — pours LIQUID FIRE that flows downhill, fills low ground and burns for 5 seconds. On open ground it only stings; trapped between high walls in deep fluid, a tank drowns.',
     color: '#ff7a3c', trail: 'rgba(255,122,60,0.55)', size: 2.8,
     launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.2, drag: 0.0015 },
     behavior: 'fire',
     fire: { radius: 78, depth: 15, life: 300 },   // 300 frames = 5 seconds at 60 Hz
+  },
+  {
+    id: 'fissure', name: 'Fissure Bomb', price: 350, count: 3,
+    desc: 'NO blast, NO damage — it RIPS A LONG JAGGED FISSURE across the ground: a crack ~120 px wide that swallows anything standing over it and keeps its walls forever (nothing slumps in). Pure terrain work.',
+    color: '#8fd6a8', trail: 'rgba(143,214,168,0.5)', size: 3,
+    launch: { speedScale: 0.9, gravityScale: 1.0, windScale: 1.0, drag: 0 },
+    behavior: 'fissure',
+    nodamage: true,                 // stops against a hull without hurting it
+    /* jagged crack: deepest at the centre, tapering toward both ends,
+       deterministic from position — the same shot tears the same crack */
+    fissure: { halfLen: 62, maxDepth: 46 },
   },
   {
     id: 'big', name: 'Big Bomb', price: 600, count: 1,

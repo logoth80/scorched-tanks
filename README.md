@@ -74,7 +74,8 @@ Deploy from a branch → default branch / root** — it will serve `index.html` 
   fall damage is cut hard). **Shields eat exactly ONE hit — any hit** (bullet, fire,
   even being hit at all): the circle flashes on, the hit is swallowed whole, and the
   shield instantly shatters into shards. Extra shields stay in your **bag**: when one
-  is in there, a **🛡 Raise shield** button appears during your own move. A shield
+  is in there, a **🛡 Raise shield** button appears during your own move — and the *same* one-click
+   action also sits **inside the open ammo list**, right after your shells. A shield
   is useless underground — a buried tank never gets the "first hit" favor.
 - A destroyed tank **goes out like a normal round of ammo**: its wreck detonates with
   the Basic Shot's own blast — same scale, same crater — and that blast **damages
@@ -97,7 +98,8 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 | Basic Shot | free, unlimited |
 | Cluster Bomb | **splits just before its apex into 3 bomblets**: one continues on the original trajectory, one lands a bit further, one further still — a range ladder of **full-size (Basic-scale) blasts**; the drift is the trick, not weakness |
 | Roller | lands, **rolls along the mountain** until a wall or tank stops it, then blows with a **Basic-scale blast** |
-| Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; see below |
+| Napalm | **pours liquid fire** — no blast, no crater: a burning FLUID that flows down slopes, pools in valleys and stays alive for 5 s; it only ever *drowns* a tank that is trapped **between high walls** (see below) |
+| Fissure Bomb | **no blast, no damage at all — it tears the terrain**: on impact it rips a ~120 px-wide **jagged fissure** across the ground (deepest at the centre, tapering to nothing at both ends, plus two short offshoot cracks). Whatever stands over it loses its ground and falls in. The profile is deterministic — the same shot tears the same crack — and since nothing ever slumps sideways, the sharp walls are **permanent**: bunkers, moats, new valleys, at will |
 | Big Bomb | three overlapping staggered blasts |
 | Dirt Bomb | **builds a mound of ground** instead of destroying it |
 | Leap Frog | **explodes on impact, then HOPS a long way forward and explodes again — three times over**: every stage is a **Basic-scale blast** and every leap carries ~150–200 px on open ground (a chain of plain table entries: `vx/vy` per hop, fully tunable) |
@@ -107,14 +109,17 @@ are implemented once in [`js/weapons.js`](js/weapons.js) (`explode`, `thud`, `cl
 It behaves like heavy liquid fuel: it **spreads sideways only slowly** (gentle
 surface leveling), but **slides fast down any slope** and fills valleys and low
 ground; it burns for `fire.life` frames, then shrinks away. Contact with it **stings
-slowly on purpose** (`FIRE_DOT` every `FIRE_TICK` frames ≈ 5 HP/s — grazing fire
-hurts but never melts a tank); the real killer is **going fully under**: a tank
-**fully submerged** in the fluid (depth ≥ tank height) dies on the spot — a shield
-eats that hit once, the next one does not. The fire's owner gets
+slowly on purpose** (`FIRE_DOT` every `FIRE_TICK` frames ≈ 2 HP/s — fire is area
+denial, it never melts a tank). Drowning is the exception, not the rule: deep
+fluid kills instantly **only when the tank is genuinely trapped "between high
+walls"** — its own ground at least `FIRE_PIT_RISE` px lower than ground on **both
+sides** within `FIRE_PIT_WIN`. A tank standing on open ground while fluid of any
+depth flows over it is never instantly killed — it merely stings. (A shield eats
+the drowning hit once, the next one does not.) The fire's owner gets
 credit for the kill, and the kill's battle-death order feeds the outlast payout.
 And the turn **does not pass on while the ground is burning**: resolution simply
 waits until the fire has vanished (capped by `FIRE_WAIT_MAX`). All knobs
-(`FIRE_MAX/FLOW/MIN_LEVEL/SLIDE/SLIDE_STEP/SLIDE_DEPTH/KEEP/BURNOUT/DOT/TICK/WAIT_MAX`)
+(`FIRE_MAX/FLOW/MIN_LEVEL/SLIDE/SLIDE_STEP/SLIDE_DEPTH/KEEP/BURNOUT/DOT/TICK/PIT_WIN/PIT_RISE/WAIT_MAX`)
 are in `config.js`.
 
 Every explosion's **damage circle** (`explosion.radius`) is deliberately decoupled
@@ -144,6 +149,13 @@ Example of adding your own in seconds:
 }
 ```
 
+Data alone covers every *explosive* ammo. A pure terrain weapon is data plus one
+small branch: the **Fissure Bomb** uses `behavior: 'fissure'` + `nodamage: true`
+— the flight code just stops at the first contact (hulls included, harmlessly),
+and resolution turns its event into a `terrain.crack()` call, exactly like dig
+and build already work. Shop card, dropdown entry, number keys and persistence
+all pick a new table entry up automatically.
+
 ## Controls
 
 - **Drag on the field** to aim & fire, or: **←/→** barrel angle (← aims left),
@@ -151,8 +163,9 @@ Example of adding your own in seconds:
   shop order), **A/D** drive.
 - **Ammo is an openable list**: the turn panel shows a compact **Ammo ▾** button
   naming your current shell; it opens the picker only when you ask, and closes
-  after you choose. When a spare shield sits in your bag, a **🛡 Raise shield**
-  button appears during your own move.
+  after you choose. Clicking any owned shell **selects it** right there; and when
+  a spare shield sits in your bag, a **Raise shield** entry appears *in the same
+  list* — one click raises it (a HUD **🛡 Raise shield** button does the same).
 - **The wind flag is a HUD element, not a world object** — it is a real DOM flag
   in the top bar, so terrain, craters and screen shake can never cover, move or
   knock it down. Cloth length + flutter speed read the strength, mirroring reads
@@ -194,8 +207,12 @@ The engine is DOM-free, so the whole game can be simulated headless:
 ```sh
 node test/sim.js      # terrain invariants (incl. the NO-SLUMP guarantee: intact
                       # mountains never move), open map borders, every weapon incl.
-                      # liquid-fire flow/kill rules, leap frog chain (full-size
-                      # blasts + long hops) and funny-bomb fuse ordering,
+                      # liquid-fire flow + its drown-ONLY-between-high-walls rule
+                      # (open ground never drowns, one wall is not "between"),
+                      # the fissure bomb (zero damage, deferred jagged crack that
+                      # persists through settling, deterministic, swallows tanks,
+                      # and the CPU never fires or buys it), leap frog chain
+                      # (full-size blasts + long hops) and funny-bomb fuse ordering,
                       # one-hit shields, burial crush, chaining wreck blasts
                       # (Basic-scale, like normal ammo), power cap, strict turn
                       # pipeline, nicknames, per-map-dealt (fight-fixed) turn
@@ -204,7 +221,8 @@ node test/sim.js      # terrain invariants (incl. the NO-SLUMP guarantee: intact
 node test/stress.js   # 40 seeded matches: all must terminate
 node test/ui_dom.js   # DOM-free smoke of the UI layer via a tiny DOM stub:
                       # shot-order-sorted card strip (re-sorts on new maps),
-                      # openable ammo dropdown, raise-shield button rules,
+                      # openable ammo dropdown (clickable entries + the
+                      # Raise-shield option inside the list, gated by bag/state),
                       # the HUD wind flag reading strength/direction/calm
 ```
 

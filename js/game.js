@@ -134,6 +134,7 @@ class Game {
     this.blastQueue = [];
     this.blastsActive = [];
     this.pendingAdds = [];
+    this.pendingFissures = [];
     this.settling = false;
     this.resPhase = null;
     this.battleEnded = false;
@@ -511,8 +512,10 @@ class Game {
       }
       if (best < 0.6) { t._fireAcc = 0; continue; }
       const owner = bestX >= 0 && T.fireOwner[bestX] >= 0 ? T.fireOwner[bestX] : null;
-      if (best >= CFG.TANK_H) {
-        /* FULLY SUBMERGED in the burning fluid → dies, shield permitting */
+      /* DROWNING KILLS — but ONLY when the tank is genuinely trapped in
+         deep fluid "between high walls". Deep fluid flowing OVER a tank on
+         open ground never instant-kills: it only stings, slow and mild. */
+      if (best >= CFG.TANK_H && this._inFirePit(t)) {
         this.damage(t, 9999, owner, 'fire');
         t._fireAcc = 0;
       } else {
@@ -521,6 +524,22 @@ class Game {
       }
     }
     if (this.aliveCount() <= 1) this._endOfBattle();   // fire can end the battle
+  }
+
+  /* Is the tank standing in a genuine ground PIT — its own floor at least
+     FIRE_PIT_RISE px lower than ground on BOTH sides within FIRE_PIT_WIN?
+     That is what "between high walls" means; only then can fluid drown it. */
+  _inFirePit(t) {
+    const T = this.terrain;
+    const x0 = Math.round(t.x), hw = CFG.TANK_W / 2 + 4;
+    const gy = T.top(x0);
+    const win = CFG.FIRE_PIT_WIN, rise = CFG.FIRE_PIT_RISE;
+    let wallL = false, wallR = false;
+    for (let x = Math.max(0, x0 - win); x <= x0 - hw && !wallL; x++)
+      if (T.top(x) <= gy - rise) wallL = true;
+    for (let x = Math.min(CFG.W - 1, x0 + win); x >= x0 + hw && !wallR; x--)
+      if (T.top(x) <= gy - rise) wallR = true;
+    return wallL && wallR;
   }
 
   /* ---------- turn resolution state machine ---------- */
@@ -550,6 +569,27 @@ class Game {
             this.emit('fx', { kind: 'dirt', x: a.x, y: a.y, r: a.r });
           }
           this.pendingAdds = [];
+    this.pendingFissures = [];
+        }
+        if (this.pendingFissures.length) {
+          /* the Fissure Bomb tears the ground here — same strict order as
+             digs/mounds: nothing terrain-shaping happens mid-flight */
+          for (const fr of this.pendingFissures) {
+            const f = fr.spec;
+            const salt = (fr.x | 0) ^ ((this.battleNo || 0) * 0x9e37);
+            this.terrain.crack(fr.x, f.halfLen, f.maxDepth, salt);
+            this.terrain.crack(((fr.x - f.halfLen * 0.55) | 0), (f.halfLen * 0.3) | 0,
+              (f.maxDepth * 0.35) | 0, salt ^ 0x51ed);   // short offshoot cracks
+            this.terrain.crack(((fr.x + f.halfLen * 0.62) | 0), (f.halfLen * 0.35) | 0,
+              (f.maxDepth * 0.3) | 0, salt ^ 0x2f11);
+            this.emit('fx', { kind: 'thud', x: fr.x - f.halfLen * 0.7, y: this.terrain.top(fr.x) });
+            this.emit('fx', { kind: 'thud', x: fr.x, y: this.terrain.top(fr.x) });
+            this.emit('fx', { kind: 'thud', x: fr.x + f.halfLen * 0.7, y: this.terrain.top(fr.x) });
+            if (fr.owner != null && this.players[fr.owner]) {
+              this.players[fr.owner].lastImpact = { x: fr.x, y: this.terrain.top(fr.x) };
+            }
+          }
+          this.pendingFissures = [];
         }
         this.resPhase = 'settle';
         this._settleStart();
@@ -698,6 +738,10 @@ class Game {
         // ground BUILDING is also deferred to the resolution phase, so the
         // strict order (shot → terrain changes → settling → tanks) holds
         this.pendingAdds.push({ x: e.x, y: e.y, r: e.r, raise: e.raise });
+      } else if (e.type === 'fissure') {
+        // ground TEARING is deferred exactly like digging and building —
+        // the crack opens at resolution, never mid-flight
+        this.pendingFissures.push({ x: e.x, y: e.y, owner: e.owner, spec: e.spec });
       } else if (e.type === 'fire') {
         // liquid fire pours immediately — it is a flowing hazard, not a dig
         this.terrain.addFire(e.x, e.radius, e.depth, e.life, e.owner);

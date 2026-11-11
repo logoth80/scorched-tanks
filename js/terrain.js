@@ -17,6 +17,16 @@
 const SE = (root.SE = root.SE || {});
 const U = SE.util;
 
+/* Deterministic position hash for the fissure's jagged profile — the same
+   shot at the same place always tears exactly the same crack. */
+function crackRand(n, salt) {
+  let h = (Math.imul(n | 0, 2654435761) ^ Math.imul(salt | 0, 40503)) >>> 0;
+  h = (h ^ (h >>> 15)); h = Math.imul(h, 2246822507) >>> 0;
+  h = (h ^ (h >>> 13)); h = Math.imul(h, 3266489909) >>> 0;
+  h = h ^ (h >>> 16);
+  return (h >>> 0) / 4294967296;
+}
+
 class Terrain {
   constructor(W, H) {
     this.W = W; this.H = H;
@@ -147,6 +157,36 @@ class Terrain {
       }
     }
     this.addRect(cx - r, cy - r, 2 * r + 1, 2 * r + 1);
+  }
+
+  /* ---------- the Fissure Bomb: tear a long jagged crack ----------
+     Pure ground removal with a jagged depth profile: deepest at the centre,
+     tapering toward both ends. Deterministic from position + salt — the same
+     shot tears exactly the same crack. Nothing "slumps" after: with vertical
+     settling only, the fissure keeps its sharp walls forever. */
+  crack(cx, halfLen, maxDepth, salt) {
+    cx |= 0; halfLen |= 0;
+    if (halfLen <= 0) return;
+    const x0 = Math.max(0, cx - halfLen), x1 = Math.min(this.W - 1, cx + halfLen);
+    for (let x = x0; x <= x1; x++) {
+      const d = Math.abs(x - cx) / (halfLen + 1);        // 0 centre → ~1 edge
+      if (d >= 1) continue;
+      const jag = 0.55 + 0.45 * crackRand(x, salt);
+      const depth = Math.round(maxDepth * (1 - d) * jag);
+      if (depth <= 0) continue;
+      const top = this.tops[x];
+      const y1 = Math.min(this.H - 1, top + depth - 1);
+      let removed = 0, lo = -1, hi = -1;
+      for (let y = top; y <= y1; y++) {
+        const idx = y * this.W + x;
+        if (this.data[idx]) { this.data[idx] = 0; removed++; if (lo < 0) lo = y; hi = y; }
+      }
+      if (removed) {
+        this.counts[x] -= removed;
+        this.refreshTop(x);
+        this.addRect(x, lo, 1, hi - lo + 1);
+      }
+    }
   }
 
   /* dirt bomb: pile fresh ground where it lands */

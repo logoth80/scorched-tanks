@@ -143,6 +143,31 @@ p.ammo.shield = 1;
 check('and the engine action the button calls works from the aim phase',
   g.useShield(p.id) === true && p.shield === true && p.ammo.shield === 0);
 
+/* --- the shield is ALSO a one-click entry INSIDE the open ammo list --- */
+p.shield = false; p.ammo.shield = 2;
+ui._ammoOpen = true;
+ui._syncTurnPanel();
+check('the open list offers "Raise shield" with the bag count next to the ammo',
+  /data-shield/.test(registry.ammoRow.innerHTML) && /Raise shield 2/.test(registry.ammoRow.innerHTML),
+  registry.ammoRow.innerHTML.replace(/\n/g, '').slice(0, 240));
+check('ammo entries stay clickable (enabled, carry their id)',
+  /data-wid="funny"/.test(registry.ammoRow.innerHTML) &&
+  /<button class="ammoBtn" data-wid="funny"[^>]*>Funny Bomb 1/.test(registry.ammoRow.innerHTML) &&
+  !/data-wid="funny"[^>]*disabled/.test(registry.ammoRow.innerHTML),
+  registry.ammoRow.innerHTML.replace(/\n/g, '').slice(0, 240));
+p.shield = true;
+ui._syncTurnPanel();
+check('the list entry disappears while already shielded',
+  !/data-shield/.test(registry.ammoRow.innerHTML));
+p.shield = false; p.ammo.shield = 0;
+ui._syncTurnPanel();
+check('the list entry disappears with an empty bag',
+  !/data-shield/.test(registry.ammoRow.innerHTML));
+// the list click calls exactly this engine action:
+p.ammo.shield = 1;
+check('the action the list entry calls raises the shield and spends the bag',
+  g.useShield(p.id) === true && p.shield === true && p.ammo.shield === 0);
+
 /* the wind flag is a pure DOM widget — terrain can never cover it,
    and it must read strength AND direction from the wind event */
 g.emit('wind', { wind: -9 });
